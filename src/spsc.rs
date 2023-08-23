@@ -1,57 +1,104 @@
+#![warn(missing_docs)]
+
 use core::cell::{Cell, UnsafeCell};
 use std::mem::MaybeUninit;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Release};
 use std::sync::Arc;
 
-pub struct Queue<T: Send, const N: usize> {
+/// A single producer single consumer bounded FIFO queue.
+///
+/// *IMPORTANT*: N must be a power of two.
+pub struct Queue<T: Send, const N: usize>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
     reader: ReaderData,
     writer: WriterData,
     elems: [UnsafeCell<MaybeUninit<T>>; N],
 }
 
-pub struct Producer<T: Send, const N: usize> {
+/// Producer handle. May only be used from one thread.
+pub struct Producer<T: Send, const N: usize>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
     q: Arc<Queue<T, N>>,
 }
 
-pub struct Consumer<T: Send, const N: usize> {
+/// Consumer handle. May only be used from one thread.
+pub struct Consumer<T: Send, const N: usize>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
     q: Arc<Queue<T, N>>,
 }
-pub struct RefProducer<'q, T: Send, const N: usize> {
+
+/// Producer handle that holds a reference to a queue instead of [`std::sync::Arc`]. May only be used from one thread.
+pub struct RefProducer<'q, T: Send, const N: usize>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
     q: &'q Queue<T, N>,
 }
-pub struct RefConsumer<'q, T: Send, const N: usize> {
+
+/// Consumer handle that holds a reference to a queue instead of [`std::sync::Arc`]. May only be used from one thread.
+pub struct RefConsumer<'q, T: Send, const N: usize>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
     q: &'q Queue<T, N>,
 }
 
-impl<T: Send, const N: usize> Producer<T, N> {
+impl<T: Send, const N: usize> Producer<T, N>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
+    /// Pushes `item` onto the queue or
+    /// returns [`Err(item)`] if the queue is full.
     pub fn push(&self, item: T) -> Result<(), T> {
-        self.q.push_inner(item)
+        self.q.push(item)
     }
 }
 
-impl<T: Send, const N: usize> Consumer<T, N> {
+impl<T: Send, const N: usize> Consumer<T, N>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
+    /// Pops an item from the queue or returns [`None`] if the queue is empty.
     pub fn pop(&self) -> Option<T> {
-        self.q.pop_inner()
+        self.q.pop()
     }
 }
 
-impl<'q, T: Send, const N: usize> RefProducer<'q, T, N> {
+impl<'q, T: Send, const N: usize> RefProducer<'q, T, N>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
+    /// Pushes an `item` onto the queue or
+    /// returns [`Err(item)`] on failure.
     pub fn push(&self, item: T) -> Result<(), T> {
-        self.q.push_inner(item)
+        self.q.push(item)
     }
 }
 
-impl<'q, T: Send, const N: usize> RefConsumer<'q, T, N> {
+impl<'q, T: Send, const N: usize> RefConsumer<'q, T, N>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
+    /// Pops an item from the queue or returns [`None`] if the queue is empty
     pub fn pop(&self) -> Option<T> {
-        self.q.pop_inner()
+        self.q.pop()
     }
 }
 
-impl<T: Send, const N: usize> Queue<T, N> {
-    const _N_IS_POW2_CHECK: () = assert!(N.count_ones() == 1);
+impl<T: Send, const N: usize> Queue<T, N>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
     const INIT: UnsafeCell<MaybeUninit<T>> = UnsafeCell::new(MaybeUninit::uninit());
 
+    /// Creates an empty [`Queue`].
     pub const fn new() -> Self {
         Self {
             reader: ReaderData {
@@ -66,18 +113,19 @@ impl<T: Send, const N: usize> Queue<T, N> {
         }
     }
 
-    pub fn push(&mut self, item: T) -> Result<(), T> {
-        self.push_inner(item)
-    }
-
-    pub fn pop(&mut self) -> Option<T> {
-        self.pop_inner()
-    }
-
-    pub fn ref_split(&mut self) -> (RefProducer<'_, T, N>, RefConsumer<'_, T, N>) {
+    /// Splits the queue into [`RefProducer`] and [`RefConsumer`] endpoints.
+    ///
+    /// # Safety
+    ///
+    /// `ref_split` doesn't consume the queue, which
+    /// allows obtaining multiple producers/consumers,
+    /// but there can only be one thread that owns producers
+    /// and one that owns consumers.
+    pub unsafe fn ref_split(&mut self) -> (RefProducer<'_, T, N>, RefConsumer<'_, T, N>) {
         (RefProducer { q: self }, RefConsumer { q: self })
     }
 
+    /// Splits the queue into [`Producer`] and [`Consumer`] endpoints.
     pub fn split(self) -> (Producer<T, N>, Consumer<T, N>) {
         let arc_self = Arc::new(self);
         let _ = &arc_self;
@@ -89,9 +137,9 @@ impl<T: Send, const N: usize> Queue<T, N> {
         )
     }
 
-    fn push_inner(&self, item: T) -> Result<(), T> {
+    fn push(&self, item: T) -> Result<(), T> {
         /*safety:
-            Only push_inner mutates tail, and since this
+            Only push mutates tail, and since this
             is an SPSC, only one thread is allowed to call it.
         */
         let tail = unsafe { self.writer.tail.as_ptr().read() };
@@ -122,9 +170,9 @@ impl<T: Send, const N: usize> Queue<T, N> {
         Ok(())
     }
 
-    fn pop_inner(&self) -> Option<T> {
+    fn pop(&self) -> Option<T> {
         /*safety:
-            Only pop_inner mutates tail, and since this
+            Only pop mutates tail, and since this
             is an SPSC, only one thread is allowed to call it.
         */
         let head = unsafe { self.reader.head.as_ptr().read() };
@@ -157,13 +205,31 @@ impl<T: Send, const N: usize> Queue<T, N> {
     }
 }
 
-unsafe impl<T: Send, const N: usize> Send for Queue<T, N> {}
-unsafe impl<T: Send, const N: usize> Send for Producer<T, N> {}
-unsafe impl<T: Send, const N: usize> Send for Consumer<T, N> {}
-unsafe impl<'q, T: Send, const N: usize> Send for RefProducer<'q, T, N> {}
-unsafe impl<'q, T: Send, const N: usize> Send for RefConsumer<'q, T, N> {}
+unsafe impl<T: Send, const N: usize> Send for Queue<T, N> where
+    [(); (N.count_ones() == 1) as usize - 1]:
+{
+}
+unsafe impl<T: Send, const N: usize> Send for Producer<T, N> where
+    [(); (N.count_ones() == 1) as usize - 1]:
+{
+}
+unsafe impl<T: Send, const N: usize> Send for Consumer<T, N> where
+    [(); (N.count_ones() == 1) as usize - 1]:
+{
+}
+unsafe impl<'q, T: Send, const N: usize> Send for RefProducer<'q, T, N> where
+    [(); (N.count_ones() == 1) as usize - 1]:
+{
+}
+unsafe impl<'q, T: Send, const N: usize> Send for RefConsumer<'q, T, N> where
+    [(); (N.count_ones() == 1) as usize - 1]:
+{
+}
 
-impl<T: Send, const N: usize> Drop for Queue<T, N> {
+impl<T: Send, const N: usize> Drop for Queue<T, N>
+where
+    [(); (N.count_ones() == 1) as usize - 1]:,
+{
     fn drop(&mut self) {
         /*safety:
             We're being dropped, so if head/tail are being written
