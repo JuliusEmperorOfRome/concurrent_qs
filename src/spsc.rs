@@ -34,7 +34,7 @@ where
     q: Arc<Queue<T, N>>,
 }
 
-/// Producer handle that holds a reference to a queue instead of [`std::sync::Arc`]. May only be used from one thread.
+/// Producer handle that holds a simple reference to a queue with no reference counting. May only be used from one thread.
 pub struct RefProducer<'q, T: Send, const N: usize>
 where
     [(); (N.count_ones() == 1) as usize - 1]:,
@@ -42,7 +42,7 @@ where
     q: &'q Queue<T, N>,
 }
 
-/// Consumer handle that holds a reference to a queue instead of [`std::sync::Arc`]. May only be used from one thread.
+/// Consumer handle that holds a simple reference to a queue with no reference counting. May only be used from one thread.
 pub struct RefConsumer<'q, T: Send, const N: usize>
 where
     [(); (N.count_ones() == 1) as usize - 1]:,
@@ -55,7 +55,7 @@ where
     [(); (N.count_ones() == 1) as usize - 1]:,
 {
     /// Pushes `item` onto the queue or
-    /// returns [`Err(item)`] if the queue is full.
+    /// returns [`Err`] with `item` inside if the queue is full.
     pub fn push(&self, item: T) -> Result<(), T> {
         self.q.push(item)
     }
@@ -75,8 +75,8 @@ impl<'q, T: Send, const N: usize> RefProducer<'q, T, N>
 where
     [(); (N.count_ones() == 1) as usize - 1]:,
 {
-    /// Pushes an `item` onto the queue or
-    /// returns [`Err(item)`] on failure.
+    /// Pushes `item` onto the queue or
+    /// returns [`Err`] with `item` inside if the queue is full.
     pub fn push(&self, item: T) -> Result<(), T> {
         self.q.push(item)
     }
