@@ -115,12 +115,11 @@ where
 
     /// Creates an empty [`Queue`] and splits it into [`Producer`] and [`Consumer`]
     pub fn new_split() -> (Producer<T, N>, Consumer<T, N>) {
-        #[cfg(not(feature = "no_new_uninit"))]
         let q = unsafe {
             use std::ptr::addr_of_mut;
 
-            let q_uninit = Arc::<Queue<T, N>>::new_uninit();
-            let ptr = q_uninit.as_ptr() as *mut Queue<T, N>;
+            let ptr = Arc::into_raw(Arc::<MaybeUninit<Queue<T, N>>>::new(MaybeUninit::uninit()))
+                as *mut Queue<T, N>;
 
             addr_of_mut!((*ptr).reader).write(ReaderData {
                 head: AtomicUsize::default(),
@@ -135,10 +134,8 @@ where
             /* there is no need to init q.elems since its a slice of MaybeUninits
              */
 
-            q_uninit.assume_init()
+            Arc::from_raw(ptr)
         };
-        #[cfg(feature = "no_new_uninit")]
-        let q = Arc::new(Self::new());
         (Producer { q: q.clone() }, Consumer { q: q })
     }
 
@@ -156,7 +153,7 @@ where
 
     /// Splits the queue into [`Producer`] and [`Consumer`] endpoints.
     ///
-    /// It's never better than [`new_split`] and oftentimes worse.
+    /// It's always worse than [`new_split`](#new_split)
     #[deprecated(
         since = "0.1.1",
         note = "There is no reason to use this method over Queue::new_split()"

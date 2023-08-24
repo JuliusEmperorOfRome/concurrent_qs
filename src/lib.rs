@@ -1,6 +1,5 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
-#![cfg_attr(not(no_new_uninit), feature(new_uninit))]
 /// A bounded lock-free SPSC(single producer, single consumer) FIFO queue.
 ///
 /// # EXAMPLES
