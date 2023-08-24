@@ -34,7 +34,8 @@ where
     q: Arc<Queue<T, N>>,
 }
 
-/// Producer handle that holds a simple reference to a queue with no reference counting. May only be used from one thread.
+/// Producer handle that holds a simple reference to a queue with no reference counting.
+/// May only be used from one thread.
 pub struct RefProducer<'q, T: Send, const N: usize>
 where
     [(); (N.count_ones() == 1) as usize - 1]:,
@@ -42,7 +43,8 @@ where
     q: &'q Queue<T, N>,
 }
 
-/// Consumer handle that holds a simple reference to a queue with no reference counting. May only be used from one thread.
+/// Consumer handle that holds a simple reference to a queue with no reference counting.
+/// May only be used from one thread.
 pub struct RefConsumer<'q, T: Send, const N: usize>
 where
     [(); (N.count_ones() == 1) as usize - 1]:,
@@ -86,7 +88,7 @@ impl<'q, T: Send, const N: usize> RefConsumer<'q, T, N>
 where
     [(); (N.count_ones() == 1) as usize - 1]:,
 {
-    /// Pops an item from the queue or returns [`None`] if the queue is empty
+    /// Pops an item from the queue or returns [`None`] if the queue is empty.
     pub fn pop(&self) -> Option<T> {
         self.q.pop()
     }
@@ -113,7 +115,7 @@ where
         }
     }
 
-    /// Creates an empty [`Queue`] and splits it into [`Producer`] and [`Consumer`]
+    /// Creates an empty [`Queue`] and splits it into [`Producer`] and [`Consumer`].
     pub fn new_split() -> (Producer<T, N>, Consumer<T, N>) {
         let q = unsafe {
             use std::ptr::addr_of_mut;
@@ -131,7 +133,7 @@ where
                 head_cache: Cell::default(),
             });
 
-            /* there is no need to init q.elems since its a slice of MaybeUninits
+            /* There is no need to init q.elems since its a slice of MaybeUninits.
              */
 
             Arc::from_raw(ptr)
@@ -153,7 +155,7 @@ where
 
     /// Splits the queue into [`Producer`] and [`Consumer`] endpoints.
     ///
-    /// It's always worse than [`new_split`](#new_split)
+    /// It's always worse than [`new_split`](#new_split).
     #[deprecated(
         since = "0.1.1",
         note = "There is no reason to use this method over Queue::new_split()"
@@ -177,8 +179,8 @@ where
         let tail = unsafe { self.writer.tail.as_ptr().read() };
 
         /*
-        since N is a power of two (checked at compile time) and indices are always
-        used mod N, doing arithmetic mod *higher power of two* is perfectly fine
+        Since N is a power of two (checked at compile time) and indices are always
+        used mod N, doing arithmetic mod *higher power of two* is perfectly fine.
         */
         if tail == self.writer.head_cache.get().wrapping_add(N) {
             self.writer.head_cache.set(self.reader.head.load(Acquire));
@@ -189,8 +191,8 @@ where
         /* safety:
             get_unchecked(tail % N): elems.len() == N
             get().write(...):
-                it was either uninit from construction or
-                moved from by reader, checked by the if blocks above
+                It was either uninit from construction or
+                moved from by reader, checked by the if blocks above.
         */
         unsafe {
             self.elems
@@ -218,8 +220,8 @@ where
         /* safety:
             get_unchecked(head % N): elems.len() == N
             get().read().assume_init():
-                the if blocks above check that the
-                writer has init'ed the data
+                The if blocks above check that the
+                writer has init'ed the data.
         */
         let item = unsafe {
             self.elems
@@ -229,8 +231,8 @@ where
                 .assume_init()
         };
         /*
-        since N is a power of two (checked at compile time) and indices are always
-        used mod N, doing arithmetic mod *higher power of two* is perfectly fine
+        Since N is a power of two (checked at compile time) and indices are always
+        used mod N, doing arithmetic mod *higher power of two* is perfectly fine.
         */
         self.reader.head.store(head.wrapping_add(1), Release);
         Some(item)
@@ -279,7 +281,7 @@ where
             /*safety:
                 get_unchecked_mut(head % N): elems.len() == N
                 get_mut().as_mut_ptr().drop_in_place():
-                    all initialised elements are between head and tail
+                    All initialised elements are between head and tail.
             */
             unsafe {
                 self.elems
@@ -289,14 +291,15 @@ where
                     .drop_in_place()
             }
             /*
-            since N is a power of two (checked at compile time) and indices are always
-            used mod N, doing arithmetic mod *higher power of two* is perfectly fine
+            Since N is a power of two (checked at compile time) and indices are always
+            used mod N, doing arithmetic mod *higher power of two* is perfectly fine.
             */
             head = head.wrapping_add(1);
         }
     }
 }
 
+/*Note: 64 byte aligned to avoid false sharing.*/
 #[repr(align(64))]
 struct ReaderData {
     head: AtomicUsize,
