@@ -2,7 +2,6 @@
 
 use core::cell::{Cell, UnsafeCell};
 use std::mem::MaybeUninit;
-use std::ptr::addr_of_mut;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Release};
 use std::sync::Arc;
@@ -115,12 +114,11 @@ where
     }
 
     /// Creates an empty [`Queue`] and splits it into [`Producer`] and [`Consumer`]
-    ///
-    /// Depending on the config may be better than Queue::new().split()
-    #[cfg_attr(no_new_uninit, allow(deprecated))]
     pub fn new_split() -> (Producer<T, N>, Consumer<T, N>) {
-        #[cfg(not(no_new_uninit))]
+        #[cfg(not(feature = "no_new_uninit"))]
         let q = unsafe {
+            use std::ptr::addr_of_mut;
+
             let q_uninit = Arc::<Queue<T, N>>::new_uninit();
             let ptr = q_uninit.as_ptr() as *mut Queue<T, N>;
 
@@ -139,8 +137,8 @@ where
 
             q_uninit.assume_init()
         };
-        #[cfg(no_new_uninit)]
-        let q = Self::new().split();
+        #[cfg(feature = "no_new_uninit")]
+        let q = Arc::new(Self::new());
         (Producer { q: q.clone() }, Consumer { q: q })
     }
 
@@ -157,6 +155,8 @@ where
     }
 
     /// Splits the queue into [`Producer`] and [`Consumer`] endpoints.
+    ///
+    /// It's never better than [`new_split`] and oftentimes worse.
     #[deprecated(
         since = "0.1.1",
         note = "There is no reason to use this method over Queue::new_split()"
