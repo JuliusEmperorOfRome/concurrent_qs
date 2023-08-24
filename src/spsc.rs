@@ -2,13 +2,14 @@
 
 use core::cell::{Cell, UnsafeCell};
 use std::mem::MaybeUninit;
+use std::ptr::addr_of_mut;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Release};
 use std::sync::Arc;
 
 /// A single producer single consumer bounded FIFO queue.
 ///
-/// *IMPORTANT*: N must be a power of two.
+/// ***IMPORTANT***: N must be a power of two.
 pub struct Queue<T: Send, const N: usize>
 where
     [(); (N.count_ones() == 1) as usize - 1]:,
@@ -113,6 +114,36 @@ where
         }
     }
 
+    /// Creates an empty [`Queue`] and splits it into [`Producer`] and [`Consumer`]
+    ///
+    /// Depending on the config may be better than Queue::new().split()
+    #[cfg_attr(no_new_uninit, allow(deprecated))]
+    pub fn new_split() -> (Producer<T, N>, Consumer<T, N>) {
+        #[cfg(not(no_new_uninit))]
+        let q = unsafe {
+            let q_uninit = Arc::<Queue<T, N>>::new_uninit();
+            let ptr = q_uninit.as_ptr() as *mut Queue<T, N>;
+
+            addr_of_mut!((*ptr).reader).write(ReaderData {
+                head: AtomicUsize::default(),
+                tail_cache: Cell::default(),
+            });
+
+            addr_of_mut!((*ptr).writer).write(WriterData {
+                tail: AtomicUsize::default(),
+                head_cache: Cell::default(),
+            });
+
+            /* there is no need to init q.elems since its a slice of MaybeUninits
+             */
+
+            q_uninit.assume_init()
+        };
+        #[cfg(no_new_uninit)]
+        let q = Self::new().split();
+        (Producer { q: q.clone() }, Consumer { q: q })
+    }
+
     /// Splits the queue into [`RefProducer`] and [`RefConsumer`] endpoints.
     ///
     /// # Safety
@@ -126,6 +157,10 @@ where
     }
 
     /// Splits the queue into [`Producer`] and [`Consumer`] endpoints.
+    #[deprecated(
+        since = "0.1.1",
+        note = "There is no reason to use this method over Queue::new_split()"
+    )]
     pub fn split(self) -> (Producer<T, N>, Consumer<T, N>) {
         let arc_self = Arc::new(self);
         let _ = &arc_self;
@@ -275,4 +310,100 @@ struct ReaderData {
 struct WriterData {
     tail: AtomicUsize,
     head_cache: Cell<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Queue;
+    use std::thread;
+
+    #[test]
+    fn mt_ref_test() {
+        static mut Q: Queue<i32, 4> = Queue::new();
+        let (src, sink) = unsafe { Q.ref_split() };
+
+        let thread = thread::spawn(move || {
+            for i in 0..256 {
+                loop {
+                    if let Some(item) = sink.pop() {
+                        assert_eq!(item, i);
+                        break;
+                    }
+                    thread::yield_now();
+                }
+            }
+        });
+
+        for i in 0..256 {
+            while let Err(_) = src.push(i) {
+                thread::yield_now();
+            }
+        }
+
+        thread.join().expect("Failed to join thread.");
+    }
+
+    #[test]
+    fn mt_arc_test() {
+        let (src, sink) = Queue::<i32, 4>::new_split();
+
+        let thread = thread::spawn(move || {
+            for i in 0..256 {
+                loop {
+                    if let Some(item) = sink.pop() {
+                        assert_eq!(item, i);
+                        break;
+                    }
+                    std::thread::yield_now();
+                }
+            }
+        });
+
+        for i in 0..256 {
+            while let Err(_) = src.push(i) {
+                std::thread::yield_now();
+            }
+        }
+
+        thread.join().expect("Failed to join thread.");
+    }
+
+    #[test]
+    fn st_ref_test() {
+        let mut q = Queue::<i32, 4>::new();
+        let (src, sink) = unsafe { q.ref_split() };
+
+        assert_eq!(sink.pop(), None);
+
+        assert_eq!(src.push(1), Ok(()));
+        assert_eq!(src.push(2), Ok(()));
+        assert_eq!(src.push(3), Ok(()));
+        assert_eq!(src.push(4), Ok(()));
+        assert_eq!(src.push(5), Err(5));
+
+        assert_eq!(sink.pop(), Some(1));
+        assert_eq!(sink.pop(), Some(2));
+        assert_eq!(sink.pop(), Some(3));
+        assert_eq!(sink.pop(), Some(4));
+        assert_eq!(sink.pop(), None);
+    }
+
+    #[test]
+    fn st_arc_test() {
+        let (src, sink) = Queue::<i32, 4>::new_split();
+
+        assert_eq!(sink.pop(), None);
+
+        assert_eq!(src.push(1), Ok(()));
+        assert_eq!(src.push(2), Ok(()));
+        assert_eq!(src.push(3), Ok(()));
+        assert_eq!(src.push(4), Ok(()));
+        assert_eq!(src.push(5), Err(5));
+
+        assert_eq!(sink.pop(), Some(1));
+        assert_eq!(sink.pop(), Some(2));
+        assert_eq!(sink.pop(), Some(3));
+        assert_eq!(sink.pop(), Some(4));
+        assert_eq!(sink.pop(), None);
+    }
 }
