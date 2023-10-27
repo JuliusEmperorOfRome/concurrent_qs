@@ -126,9 +126,8 @@ impl<T> Inner<T> {
     }
 
     fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
-        use TrySendError::*;
         if self.shared.drop_count.load(Relaxed) != 0 {
-            return Err(Disconnected(item));
+            return Err(TrySendError::Disconnected(item));
         }
 
         /*SAFETY:
@@ -143,7 +142,7 @@ impl<T> Inner<T> {
             self.sender.head_cache.set(self.receiver.head.load(Acquire));
 
             if tail == self.sender.head_cache.get().wrapping_add(cap) {
-                return Err(Full(item));
+                return Err(TrySendError::Full(item));
             }
         }
 
@@ -172,9 +171,6 @@ impl<T> Inner<T> {
 
     fn try_recv(&self) -> Result<T, TryRecvError> {
         use TryRecvError::*;
-        if self.shared.drop_count.load(Relaxed) != 0 {
-            return Err(Disconnected);
-        }
         /*SAFETY:
          *head is only modified by try_recv and this is
          *an SPSC, so no other thread is modifying it.
@@ -184,6 +180,10 @@ impl<T> Inner<T> {
         if head == self.receiver.tail_cache.get() {
             self.receiver.tail_cache.set(self.sender.tail.load(Acquire));
             if head == self.receiver.tail_cache.get() {
+                // Let the receiver consume all the messages after sender disconnects.
+                if self.shared.drop_count.load(Relaxed) != 0 {
+                    return Err(Disconnected);
+                }
                 return Err(Empty);
             }
         }
@@ -277,30 +277,27 @@ impl error::Error for TryRecvError {}
 
 impl<T> fmt::Display for TrySendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        use TrySendError::*;
         match *self {
-            Full(_) => f.write_str("writing to a full queue"),
-            Disconnected(_) => f.write_str("writing to a disconnected queue"),
+            TrySendError::Full(_) => f.write_str("writing to a full queue"),
+            TrySendError::Disconnected(_) => f.write_str("writing to a disconnected queue"),
         }
     }
 }
 
 impl fmt::Display for TryRecvError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use TryRecvError::*;
         match *self {
-            Empty => f.write_str("reading from an empty queue"),
-            Disconnected => f.write_str("reading from a disconnected queue"),
+            TryRecvError::Empty => f.write_str("reading from an empty queue"),
+            TryRecvError::Disconnected => f.write_str("reading from a disconnected queue"),
         }
     }
 }
 
 impl<T> fmt::Debug for TrySendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use TrySendError::*;
         match *self {
-            Full(_) => "Full(..)".fmt(f),
-            Disconnected(_) => "Disconnected(..)".fmt(f),
+            TrySendError::Full(_) => "Full(..)".fmt(f),
+            TrySendError::Disconnected(_) => "Disconnected(..)".fmt(f),
         }
     }
 }
