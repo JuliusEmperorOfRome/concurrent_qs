@@ -9,22 +9,29 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
 use std::usize;
 
-/*
-TODO - document
-*/
-
+/// An enumeration listing the failure modes of the [`try_send`](Sender::try_send) method.
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum TrySendError<T> {
+    /// The data couldn't be sent on the [`channel`] because the internal buffer was already full.
     Full(T),
+    /// The [`Receiver`] bound to the [`channel`] disconnected and any further sends will not succeed.
     Disconnected(T),
 }
 
+/// An enumeration listing the failure modes of the [`try_recv`](Receiver::try_recv) method.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum TryRecvError {
+    /// No data was received from the [`channel`] because the internal buffer was empty.
     Empty,
+    /// The [`Sender`] bound to the [`channel`] disconnected and all previously sent data was already received.
     Disconnected,
 }
 
+/// Creates a SPSC channel with storage for at least `min_capacity` elements.
+///
+/// # Panics
+///
+/// The function panics if it can't allocate the memory needed for the channel.
 pub fn channel<T>(min_capacity: usize) -> (Sender<T>, Receiver<T>) {
     let capacity = min_capacity
         .checked_next_power_of_two()
@@ -33,15 +40,23 @@ pub fn channel<T>(min_capacity: usize) -> (Sender<T>, Receiver<T>) {
     let inner = NonNull::from(Box::leak(Box::new(Inner::<T>::new(capacity))));
     (Sender { inner: inner }, Receiver { inner: inner })
 }
+
+/// The sending endpoint of a [`channel`].
+///
+/// Data can be sent using the [`try_send`](Sender::try_send) method.
 pub struct Sender<T> {
     inner: NonNull<Inner<T>>,
 }
 
+/// The receiving endpoint of a [`channel`].
+///
+/// Data can be received using the [`try_recv`](Receiver::try_recv) method.
 pub struct Receiver<T> {
     inner: NonNull<Inner<T>>,
 }
 
 impl<T> Sender<T> {
+    /// Tries to send a value through this channel without blocking.
     pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
         /*SAFETY:
          *inner is only dropped when this sender and the coresponding receiver
@@ -51,6 +66,7 @@ impl<T> Sender<T> {
 }
 
 impl<T> Receiver<T> {
+    /// Tries to return a pending value without blocking.
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
         unsafe { self.inner.as_ref() }.try_recv()
     }
