@@ -4,9 +4,10 @@ use std::default::Default;
 use std::error;
 use std::fmt;
 use std::mem::MaybeUninit;
+use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::usize;
 
 /// An enumeration listing the failure modes of the [`try_send`](Sender::try_send) method.
@@ -38,74 +39,41 @@ pub fn channel<T>(min_capacity: usize) -> (Sender<T>, Receiver<T>) {
         .expect("capacity overflow"); /*from std::Vec: https://doc.rust-lang.org/src/alloc/raw_vec.rs.html*/
 
     let inner = NonNull::from(Box::leak(Box::new(Inner::<T>::new(capacity))));
-    (Sender { inner: inner }, Receiver { inner: inner })
+    (
+        Sender {
+            inner: InnerHolder(inner),
+        },
+        Receiver {
+            inner: InnerHolder(inner),
+        },
+    )
 }
 
 /// The sending endpoint of a [`channel`].
 ///
 /// Data can be sent using the [`try_send`](Sender::try_send) method.
 pub struct Sender<T> {
-    inner: NonNull<Inner<T>>,
+    inner: InnerHolder<T>,
 }
 
 /// The receiving endpoint of a [`channel`].
 ///
 /// Data can be received using the [`try_recv`](Receiver::try_recv) method.
 pub struct Receiver<T> {
-    inner: NonNull<Inner<T>>,
+    inner: InnerHolder<T>,
 }
 
 impl<T> Sender<T> {
     /// Tries to send a value through this channel without blocking.
     pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
-        /*SAFETY:
-         *inner is only dropped when this sender and the coresponding receiver
-         */
-        unsafe { self.inner.as_ref() }.try_send(item)
+        self.inner.try_send(item)
     }
 }
 
 impl<T> Receiver<T> {
     /// Tries to return a pending value without blocking.
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
-        unsafe { self.inner.as_ref() }.try_recv()
-    }
-}
-
-impl<T> Drop for Sender<T> {
-    fn drop(&mut self) {
-        /*SAFETY:
-         *this method and Receiver<T>::drop are responsible for the lifetime of inner*/
-        let inner = unsafe { self.inner.as_ref() };
-
-        /*fetch_add is only called twice for any Inner, so if the
-         *prev value is 1, the other end point has already dropped.
-         */
-        if inner.shared.drop_count.fetch_add(1, SeqCst) == 1 {
-            /*SAFETY:
-             *self.inner is made from a Box::leak(...)
-             */
-            drop(unsafe { Box::from_raw(self.inner.as_ptr()) });
-        }
-    }
-}
-
-impl<T> Drop for Receiver<T> {
-    fn drop(&mut self) {
-        /*SAFETY:
-         *this method and Sender<T>::drop are responsible for the lifetime of inner*/
-        let inner = unsafe { self.inner.as_ref() };
-
-        /*fetch_add is only called twice for any Inner, so if the
-         *prev value is 1, the other end point has already dropped.
-         *SeqCst is most likely not necessary, but this is cold code anyways.
-         */
-        if inner.shared.drop_count.fetch_add(1, SeqCst) == 1 {
-            /*SAFETY:
-             *self.inner is made from a Box::leak(...)
-             */
-            drop(unsafe { Box::from_raw(self.inner.as_ptr()) });
-        }
+        self.inner.try_recv()
     }
 }
 
@@ -266,6 +234,40 @@ struct ReceiverData {
 struct SharedData<T> {
     buffer: Box<[UnsafeCell<MaybeUninit<T>>]>,
     drop_count: AtomicUsize, /*dropped endpoint count*/
+}
+
+struct InnerHolder<T>(NonNull<Inner<T>>);
+
+impl<T> Deref for InnerHolder<T> {
+    type Target = Inner<T>;
+
+    fn deref(&self) -> &Self::Target {
+        /*SAFETY:
+         *This is the type that tracks the lifetime
+         *of the Inner pointed to by self.0.
+         */
+        unsafe { self.0.as_ref() }
+    }
+}
+
+impl<T> DerefMut for InnerHolder<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        /*SAFETY:
+         *This is the type that tracks the lifetime
+         *of the Inner pointed to by self.0.
+         */
+        unsafe { self.0.as_mut() }
+    }
+}
+
+impl<T> Drop for InnerHolder<T> {
+    fn drop(&mut self) {
+        /*There are 2 holders for any Inner, so if the previously
+         *dropped holder count was 1, the other was already dropped.*/
+        if self.deref().shared.drop_count.fetch_add(1, AcqRel) == 1 {
+            drop(unsafe { Box::from_raw(self.deref_mut()) });
+        }
+    }
 }
 
 impl Default for SenderData {
