@@ -1,14 +1,13 @@
+use crate::cell::{Cell, UnsafeCell};
+use crate::sync::atomic::AtomicUsize;
+use crate::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use crate::util::CacheAligned;
-use std::cell::{Cell, UnsafeCell};
 use std::default::Default;
 use std::error;
 use std::fmt;
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
-use std::usize;
 
 /// An enumeration listing the failure modes of the [`try_send`](Sender::try_send) method.
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -111,20 +110,33 @@ impl<T> Inner<T> {
     fn new(capacity: usize) -> Self {
         // should already be ensured in channel()
         debug_assert!(capacity.is_power_of_two(), "capacity wasn't a power of two");
+        #[cfg(not(loom))]
+        let buffer = {
+            let mut vec = Vec::with_capacity(capacity);
+            /*SAFETY:
+             *elements are MaybeUninit, so uninitialised
+             *data is a valid value for them.
+             */
+            unsafe { vec.set_len(capacity) };
+            vec.into_boxed_slice()
+        };
+        /*
+        !!!IMPORTANT!!!
 
+        In loom, UnsafeCell::new(MaybeUninit::uninit()) isn't uninitialised memory.
+        It initialises extra fields used for keeping track of accesses to the cell.
+
+        !!!DO NOT DELETE THE CODE BELOW!!!
+        */
+        #[cfg(loom)]
+        let buffer = (0..capacity)
+            .map(|_| UnsafeCell::new(MaybeUninit::uninit()))
+            .collect::<Box<[UnsafeCell<MaybeUninit<T>>]>>();
         Self {
             sender: CacheAligned::default(),
             receiver: CacheAligned::default(),
             shared: SharedData {
-                buffer: {
-                    let mut vec = Vec::with_capacity(capacity);
-                    /*SAFETY:
-                     *elements are MaybeUninit, so uninitialised
-                     *data is a valid value for them.
-                     */
-                    unsafe { vec.set_len(capacity) };
-                    vec.into_boxed_slice()
-                },
+                buffer: buffer,
                 drop_count: AtomicUsize::default(),
             },
         }
@@ -139,7 +151,10 @@ impl<T> Inner<T> {
          *tail is only modified by try_send and this is
          *an SPSC, so no other thread is modifying it.
          */
+        #[cfg(not(loom))]
         let tail = unsafe { self.sender.tail.as_ptr().read() };
+        #[cfg(loom)]
+        let tail = unsafe { self.sender.tail.unsync_load() };
 
         let cap = self.shared.buffer.len();
 
@@ -162,14 +177,14 @@ impl<T> Inner<T> {
              *receiver only reads values past self.reader.head
              *and the if block above checks for this.
              */
-            let slot = slot.get();
-            /*SAFETY:
-             *this doesn't overwrite valid <T>s because it's either
-             *uninit from Self::new() or already taken out by reader.
-             */
-            (slot as *mut T).write(item);
+            slot.with_mut(|ptr| {
+                /*SAFETY:
+                 *this doesn't overwrite valid <T>s because it's either
+                 *uninit from Self::new() or already taken out by reader.
+                 */
+                (ptr as *mut T).write(item)
+            });
         }
-
         self.sender.tail.store(tail.wrapping_add(1), Release);
         Ok(())
     }
@@ -180,14 +195,20 @@ impl<T> Inner<T> {
          *head is only modified by try_recv and this is
          *an SPSC, so no other thread is modifying it.
          */
+        #[cfg(not(loom))]
         let head = unsafe { self.receiver.head.as_ptr().read() };
+        #[cfg(loom)]
+        let head = unsafe { self.receiver.head.unsync_load() };
 
         if head == self.receiver.tail_cache.get() {
             self.receiver.tail_cache.set(self.sender.tail.load(Acquire));
             if head == self.receiver.tail_cache.get() {
                 // Let the receiver consume all the messages after sender disconnects.
-                if self.shared.drop_count.load(Relaxed) != 0 {
-                    return Err(Disconnected);
+                if self.shared.drop_count.load(Acquire) != 0 {
+                    self.receiver.tail_cache.set(self.sender.tail.load(Acquire));
+                    if head == self.receiver.tail_cache.get() {
+                        return Err(Disconnected);
+                    }
                 }
                 return Err(Empty);
             }
@@ -201,8 +222,10 @@ impl<T> Inner<T> {
              *the get_unchecked call is valid.
              */
             let slot = buffer.get_unchecked(head & (buffer.len() - 1));
-            let slot = slot.get();
-            slot.read().assume_init()
+            /*SAFETY:
+             *everything before tail has been written to by the sender.
+             */
+            slot.with_mut(|ptr| (ptr as *mut T).read())
         };
 
         self.receiver.head.store(head.wrapping_add(1), Release);
@@ -214,14 +237,22 @@ impl<T> Drop for Inner<T> {
     fn drop(&mut self) {
         //head points to the first not read element
         //tail points after the last written element
+        /*SAFETY:
+         *this object is being destroyed so we
+         *have exclusive access to these atomics.
+         */
+        #[cfg(not(loom))]
         let (mut head, tail) = unsafe {
-            /*SAFETY:
-             *this object is being destroyed so we
-             *have exclusive access to these atomics.
-             */
             (
                 self.receiver.head.as_ptr().read(),
                 self.sender.tail.as_ptr().read(),
+            )
+        };
+        #[cfg(loom)]
+        let (mut head, tail) = unsafe {
+            (
+                self.receiver.head.unsync_load(),
+                self.sender.tail.unsync_load(),
             )
         };
 
@@ -236,7 +267,7 @@ impl<T> Drop for Inner<T> {
             /*SAFETY:
              *all elements in [head, tail) have been sent, but not received.
              */
-            unsafe { slot.get_mut().assume_init_drop() };
+            unsafe { slot.with_mut(|ptr| std::ptr::drop_in_place(ptr)) };
             head = head.wrapping_add(1);
         }
     }
@@ -350,7 +381,7 @@ impl<T> fmt::Debug for TrySendError<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    cfg_not_loom! {
     #[test]
     fn st_insert_remove() {
         let (src, sink) = channel::<i32>(4);
@@ -380,8 +411,80 @@ mod tests {
         drop(sink);
         assert_eq!(src.try_send(1), Err(TrySendError::Disconnected(1)));
     }
+    }
 
-    /*
-    TODO - further testing
-    */
+    cfg_loom! {
+    use loom::thread;
+    use loom::model::model;
+
+    #[test]
+    fn mt_insert_remove() {
+        model(|| {
+            // small capacity to speed up loom testing.
+            let (src, sink) = channel(2);
+
+            thread::spawn(move || {
+                for i in 0..4 {
+                    loop {
+                        match src.try_send(i) {
+                            Ok(_) => break,
+                            Err(TrySendError::Full(_)) => thread::yield_now(),
+                            Err(TrySendError::Disconnected(at)) => {
+                                panic!("Receiver dropped before end of data.(at {at})")
+                            }
+                        }
+                    }
+                }
+            });
+
+            for i in 0..4 {
+                loop {
+                    match sink.try_recv() {
+                        Ok(ret) => {
+                            assert_eq!(ret, i,"Data should be received in the same order as it was sent.");
+                            break;
+                        },
+                        Err(TryRecvError::Empty) => thread::yield_now(),
+                        Err(TryRecvError::Disconnected) => {
+                            panic!("Sender dropped before sending all data.(at {i})")
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn mt_sender_disconnect() {
+        model(|| {
+            let (src, sink) = channel::<i32>(1);//minimize the time loom takes.
+            thread::spawn(|| drop(src));
+            loop {
+                match sink.try_recv() {
+                    Ok(_) => panic!("No data was sent, but some was received."),
+                    Err(TryRecvError::Empty) => thread::yield_now(),
+                    Err(TryRecvError::Disconnected) => break,
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn mt_receiver_disconnect() {
+        model(|| {
+            let (src, sink) = channel::<i32>(1);//minimize the time loom takes.
+            thread::spawn(|| drop(sink));
+            loop {
+                match src.try_send(0) {
+                    Ok(_) => thread::yield_now(),
+                    Err(TrySendError::Full(x)) => {
+                        assert_eq!(x, 0);
+                        thread::yield_now();
+                    },
+                    Err(TrySendError::Disconnected(x)) => break assert_eq!(x, 0),
+                }
+            }
+        });
+    }
+    }
 }

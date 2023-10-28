@@ -10,7 +10,7 @@
 /// use std::thread;
 /// fn main() {
 ///     let (src, sink) = bounded::channel::<&'static str>(8);
-///     
+///
 ///     thread::spawn(move || {
 ///         src.try_send("H").unwrap();
 ///         src.try_send("E").unwrap();
@@ -27,7 +27,7 @@
 ///             _ => break,
 ///         }
 ///     }
-///     
+///
 ///     assert_eq!(str, "HELLO");
 /// }
 /// ```
