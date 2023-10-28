@@ -65,15 +65,36 @@ pub struct Receiver<T> {
 
 impl<T> Sender<T> {
     /// Tries to send a value through this channel without blocking.
+    #[inline]
     pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
         self.inner.try_send(item)
+    }
+
+    /// Checks if the [`channel`]'s receiver is still connected.
+    #[inline]
+    pub fn receiver_connected(&self) -> bool {
+        self.inner.peer_connected()
     }
 }
 
 impl<T> Receiver<T> {
     /// Tries to return a pending value without blocking.
+    #[inline]
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
         self.inner.try_recv()
+    }
+
+    /// Checks if the [`channel`]'s sender is still connected.
+    ///
+    /// # Note
+    ///
+    /// The [`try_recv`](Receiver::try_recv) method returns [`TryRecvError::Disconnected`]
+    /// only after consuming all previously sent data, even if the
+    /// [`Sender`] isn't connected. This method, on the other hand,
+    /// doesn't take pending data into account.
+    #[inline]
+    pub fn sender_connected(&self) -> bool {
+        self.inner.peer_connected()
     }
 }
 
@@ -237,6 +258,12 @@ struct SharedData<T> {
 }
 
 struct InnerHolder<T>(NonNull<Inner<T>>);
+
+impl<T> InnerHolder<T> {
+    fn peer_connected(&self) -> bool {
+        self.deref().shared.drop_count.load(Relaxed) == 0
+    }
+}
 
 impl<T> Deref for InnerHolder<T> {
     type Target = Inner<T>;
