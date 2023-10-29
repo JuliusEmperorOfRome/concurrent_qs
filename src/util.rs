@@ -1,5 +1,10 @@
 use std::default::Default;
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+
+pub(crate) type PhantomUnsync = PhantomData<std::cell::Cell<()>>;
+#[allow(dead_code)]
+pub(crate) type PhantomUnsend = PhantomData<std::sync::MutexGuard<'static, ()>>;
 
 // Alignment values aken from crossbeam(https://crates.io/crates/crossbeam/0.8.2)
 
