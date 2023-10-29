@@ -1,7 +1,7 @@
 [package]
 name = "concurrent_qs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [target.'cfg(loom)'.dependencies]
-loom = { version = "0.5", features = ["checkpoint"] }
+loom = { version = "0.6", features = ["checkpoint"] }

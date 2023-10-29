@@ -21,6 +21,8 @@ macro_rules! cfg_not_loom {
 mod cell;
 #[doc(hidden)]
 mod sync;
+#[doc(hidden)]
+mod thread;
 //loom is now intergrated
 
 /// A module containing flavors of Single Producer Single Consumer queues.

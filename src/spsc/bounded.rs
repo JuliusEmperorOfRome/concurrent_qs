@@ -6,7 +6,6 @@ use std::default::Default;
 use std::error;
 use std::fmt;
 use std::mem::MaybeUninit;
-use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
 /// An enumeration listing the failure modes of the [`try_send`](Sender::try_send) method.
@@ -27,6 +26,20 @@ pub enum TryRecvError {
     Disconnected,
 }
 
+/// Error for the [`send`](Sender::send) method.
+///
+/// This error is returned when the [`Receiver`] bound to the [`channel`]
+/// has disconnected. The `T` is the item that failed to send.
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub struct SendError<T>(pub T);
+
+/// Error for the [`recv`](Receiver::recv) method.
+///
+/// This error is returned when the [`Sender`] bound to the [`channel`]
+/// has disconnected.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct RecvError {}
+
 /// Creates a SPSC channel with storage for at least `min_capacity` elements.
 ///
 /// # Panics
@@ -38,41 +51,50 @@ pub fn channel<T>(min_capacity: usize) -> (Sender<T>, Receiver<T>) {
         .expect("capacity overflow"); /*from std::Vec: https://doc.rust-lang.org/src/alloc/raw_vec.rs.html*/
 
     let inner = NonNull::from(Box::leak(Box::new(Inner::<T>::new(capacity))));
-    (
-        Sender {
-            inner: InnerHolder(inner),
-        },
-        Receiver {
-            inner: InnerHolder(inner),
-        },
-    )
+    (Sender { inner: inner }, Receiver { inner: inner })
 }
 
 /// The sending endpoint of a [`channel`].
 ///
 /// Data can be sent using the [`try_send`](Sender::try_send) method.
 pub struct Sender<T> {
-    inner: InnerHolder<T>,
+    inner: NonNull<Inner<T>>,
 }
 
 /// The receiving endpoint of a [`channel`].
 ///
 /// Data can be received using the [`try_recv`](Receiver::try_recv) method.
 pub struct Receiver<T> {
-    inner: InnerHolder<T>,
+    inner: NonNull<Inner<T>>,
 }
 
 impl<T> Sender<T> {
-    /// Tries to send a value through this channel without blocking.
+    /// Tries to send a value through this [`channel`] without blocking.
     #[inline]
     pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
-        self.inner.try_send(item)
+        self.inner_ref().try_send(item)
     }
 
-    /// Checks if the [`channel`]'s receiver is still connected.
+    /// Sends a value through this [`channel`].
+    ///
+    /// If the [`channel`] is full, blocks and waits for the [`Receiver`].
+    /// Returns a [`SendError`] if the [`Receiver`] is disconnected.
+    #[inline]
+    pub fn send(&self, item: T) -> Result<(), SendError<T>> {
+        self.inner_ref().send(item)
+    }
+
+    /// Checks if the [`channel`]'s [`Receiver`] is still connected.
     #[inline]
     pub fn receiver_connected(&self) -> bool {
-        self.inner.peer_connected()
+        self.inner_ref().peer_connected()
+    }
+
+    fn inner_ref(&self) -> &Inner<T> {
+        /*SAFETY:
+         *This type and Sender are responsible for inner's lifetime.
+         */
+        unsafe { self.inner.as_ref() }
     }
 }
 
@@ -80,10 +102,19 @@ impl<T> Receiver<T> {
     /// Tries to return a pending value without blocking.
     #[inline]
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
-        self.inner.try_recv()
+        self.inner_ref().try_recv()
     }
 
-    /// Checks if the [`channel`]'s sender is still connected.
+    /// Reads a value from the [`channel`].
+    ///
+    /// If the [`channel`] is empty, blocks and waits for the [`Sender`].
+    /// Returns a [`RecvError`] if the [`Sender`] is disconnected.
+    #[inline]
+    pub fn recv(&self) -> Result<T, RecvError> {
+        self.inner_ref().recv()
+    }
+
+    /// Checks if the [`channel`]'s [`Sender`] is still connected.
     ///
     /// # Note
     ///
@@ -93,13 +124,55 @@ impl<T> Receiver<T> {
     /// doesn't take pending data into account.
     #[inline]
     pub fn sender_connected(&self) -> bool {
-        self.inner.peer_connected()
+        self.inner_ref().peer_connected()
+    }
+
+    fn inner_ref(&self) -> &Inner<T> {
+        /*SAFETY:
+         *This type and Receiver are responsible for inner's lifetime.
+         */
+        unsafe { self.inner.as_ref() }
+    }
+}
+
+impl<T> Drop for Sender<T> {
+    fn drop(&mut self) {
+        //The other endpoint hasn't dropped yet, wake it if it's sleeping.
+        if self.inner_ref().shared.drop_count.fetch_add(1, AcqRel) == 0 {
+        }
+        //The other endpoint has already been dropped, we have to deallocate inner.
+        else {
+            drop(unsafe {
+                /*SAFETY:
+                 *inner is created with a Box in channel().
+                 */
+                Box::from_raw(self.inner.as_ptr())
+            });
+        }
+    }
+}
+
+impl<T> Drop for Receiver<T> {
+    fn drop(&mut self) {
+        //The other endpoint hasn't dropped yet, wake it if it's sleeping.
+        if self.inner_ref().shared.drop_count.fetch_add(1, AcqRel) == 0 {
+        }
+        //The other endpoint has already been dropped, we have to deallocate inner.
+        else {
+            drop(unsafe {
+                /*SAFETY:
+                 *inner is created with a Box in channel().
+                 */
+                Box::from_raw(self.inner.as_ptr())
+            });
+        }
     }
 }
 
 unsafe impl<T: Send> Send for Sender<T> {}
 unsafe impl<T: Send> Send for Receiver<T> {}
 
+#[repr(C)]
 struct Inner<T> {
     sender: CacheAligned<SenderData>,
     receiver: CacheAligned<ReceiverData>,
@@ -142,6 +215,42 @@ impl<T> Inner<T> {
         }
     }
 
+    fn send(&self, item: T) -> Result<(), SendError<T>> {
+        let mut resend = match self.try_send(item) {
+            Ok(_) => return Ok(()),
+            Err(TrySendError::Disconnected(ret)) => return Err(SendError(ret)),
+            Err(TrySendError::Full(ret)) => ret,
+        };
+        loop {
+            #[cfg(loom)]
+            loom::thread::yield_now();
+            //TODO: implement sleeping/waking
+            match self.try_send(resend) {
+                Ok(_) => break Ok(()),
+                Err(TrySendError::Disconnected(ret)) => break Err(SendError(ret)),
+                Err(TrySendError::Full(ret)) => resend = ret,
+            }
+        }
+    }
+
+    fn recv(&self) -> Result<T, RecvError> {
+        match self.try_recv() {
+            Ok(ret) => return Ok(ret),
+            Err(TryRecvError::Disconnected) => return Err(RecvError {}),
+            Err(TryRecvError::Empty) => {}
+        };
+        loop {
+            #[cfg(loom)]
+            loom::thread::yield_now();
+            //TODO: implement sleeping/waking
+            match self.try_recv() {
+                Ok(ret) => return Ok(ret),
+                Err(TryRecvError::Disconnected) => return Err(RecvError {}),
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+    }
+
     fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
         if self.shared.drop_count.load(Relaxed) != 0 {
             return Err(TrySendError::Disconnected(item));
@@ -162,6 +271,7 @@ impl<T> Inner<T> {
             self.sender.head_cache.set(self.receiver.head.load(Acquire));
 
             if tail == self.sender.head_cache.get().wrapping_add(cap) {
+                self.wake_receiver();
                 return Err(TrySendError::Full(item));
             }
         }
@@ -186,6 +296,7 @@ impl<T> Inner<T> {
             });
         }
         self.sender.tail.store(tail.wrapping_add(1), Release);
+        self.wake_receiver();
         Ok(())
     }
 
@@ -205,11 +316,12 @@ impl<T> Inner<T> {
             if head == self.receiver.tail_cache.get() {
                 // Let the receiver consume all the messages after sender disconnects.
                 if self.shared.drop_count.load(Acquire) != 0 {
-                    self.receiver.tail_cache.set(self.sender.tail.load(Acquire));
+                    self.receiver.tail_cache.set(self.sender.tail.load(Relaxed));
                     if head == self.receiver.tail_cache.get() {
                         return Err(Disconnected);
                     }
                 }
+                self.wake_sender();
                 return Err(Empty);
             }
         }
@@ -229,7 +341,22 @@ impl<T> Inner<T> {
         };
 
         self.receiver.head.store(head.wrapping_add(1), Release);
+        self.wake_sender();
         Ok(item)
+    }
+
+    fn peer_connected(&self) -> bool {
+        self.shared.drop_count.load(Acquire) == 0
+    }
+
+    #[inline]
+    fn wake_receiver(&self) {
+        //TODO: implement sleeping/waking
+    }
+
+    #[inline]
+    fn wake_sender(&self) {
+        //TODO: implement sleeping/waking
     }
 }
 
@@ -288,46 +415,6 @@ struct SharedData<T> {
     drop_count: AtomicUsize, /*dropped endpoint count*/
 }
 
-struct InnerHolder<T>(NonNull<Inner<T>>);
-
-impl<T> InnerHolder<T> {
-    fn peer_connected(&self) -> bool {
-        self.deref().shared.drop_count.load(Relaxed) == 0
-    }
-}
-
-impl<T> Deref for InnerHolder<T> {
-    type Target = Inner<T>;
-
-    fn deref(&self) -> &Self::Target {
-        /*SAFETY:
-         *This is the type that tracks the lifetime
-         *of the Inner pointed to by self.0.
-         */
-        unsafe { self.0.as_ref() }
-    }
-}
-
-impl<T> DerefMut for InnerHolder<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        /*SAFETY:
-         *This is the type that tracks the lifetime
-         *of the Inner pointed to by self.0.
-         */
-        unsafe { self.0.as_mut() }
-    }
-}
-
-impl<T> Drop for InnerHolder<T> {
-    fn drop(&mut self) {
-        /*There are 2 holders for any Inner, so if the previously
-         *dropped holder count was 1, the other was already dropped.*/
-        if self.deref().shared.drop_count.fetch_add(1, AcqRel) == 1 {
-            drop(unsafe { Box::from_raw(self.deref_mut()) });
-        }
-    }
-}
-
 impl Default for SenderData {
     #[inline(always)]
     fn default() -> Self {
@@ -350,6 +437,8 @@ impl Default for ReceiverData {
 
 impl<T> error::Error for TrySendError<T> {}
 impl error::Error for TryRecvError {}
+impl<T> error::Error for SendError<T> {}
+impl error::Error for RecvError {}
 
 impl<T> fmt::Display for TrySendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
@@ -369,12 +458,30 @@ impl fmt::Display for TryRecvError {
     }
 }
 
+impl<T> fmt::Display for SendError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("writing to a disconnected queue")
+    }
+}
+
+impl fmt::Display for RecvError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("reading from a disconnected queue")
+    }
+}
+
 impl<T> fmt::Debug for TrySendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             TrySendError::Full(_) => "Full(..)".fmt(f),
             TrySendError::Disconnected(_) => "Disconnected(..)".fmt(f),
         }
+    }
+}
+
+impl<T> fmt::Debug for SendError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SendError(..)")
     }
 }
 
@@ -400,6 +507,21 @@ mod tests {
     }
 
     #[test]
+    fn st_insert_remove_blocking() {
+        let (src, sink) = channel::<i32>(4);
+
+        assert_eq!(src.send(1), Ok(()));
+        assert_eq!(src.send(2), Ok(()));
+        assert_eq!(src.send(3), Ok(()));
+        assert_eq!(src.send(4), Ok(()));
+
+        assert_eq!(sink.recv(), Ok(1));
+        assert_eq!(sink.recv(), Ok(2));
+        assert_eq!(sink.recv(), Ok(3));
+        assert_eq!(sink.recv(), Ok(4));
+    }
+
+    #[test]
     fn st_sender_disconnect() {
         let (src, sink) = channel::<i32>(0);
         drop(src);
@@ -414,8 +536,8 @@ mod tests {
     }
 
     cfg_loom! {
-    use loom::thread;
     use loom::model::model;
+    use loom::thread;
 
     #[test]
     fn mt_insert_remove() {
@@ -435,6 +557,7 @@ mod tests {
                         }
                     }
                 }
+                println!("finished sending");
             });
 
             for i in 0..4 {
@@ -483,6 +606,22 @@ mod tests {
                     },
                     Err(TrySendError::Disconnected(x)) => break assert_eq!(x, 0),
                 }
+            }
+        });
+    }
+    #[test]
+    fn mt_insert_remove_blocking() {
+        model(|| {
+            let (src, sink) = channel::<i16>(3);
+            thread::spawn(move || {
+                //five to test wrap-around
+                for i in 0..5 {
+                    src.send(i).expect("Receiver dropped before receiving all data.");
+                }
+            });
+
+            for i in 0..5 {
+                assert_eq!(i, sink.recv().expect("Sender dropped before sending all data."), "Data should be received in the same order as it was sent.");
             }
         });
     }
