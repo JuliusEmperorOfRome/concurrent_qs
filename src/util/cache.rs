@@ -1,12 +1,7 @@
 use std::default::Default;
-use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-pub(crate) type PhantomUnsync = PhantomData<std::cell::Cell<()>>;
-#[allow(dead_code)]
-pub(crate) type PhantomUnsend = PhantomData<std::sync::MutexGuard<'static, ()>>;
-
-// Alignment values aken from crossbeam(https://crates.io/crates/crossbeam/0.8.2)
+// Alignment values taken from crossbeam(https://crates.io/crates/crossbeam/0.8.2)
 
 // Starting from Intel's Sandy Bridge, spatial prefetcher is now pulling pairs of 64-byte cache
 // lines at a time, so we have to align to 128 bytes rather than 64.

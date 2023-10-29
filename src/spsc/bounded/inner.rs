@@ -2,7 +2,7 @@ use crate::cell::{Cell, UnsafeCell};
 use crate::spsc::bounded::error::{RecvError, SendError, TryRecvError, TrySendError};
 use crate::sync::atomic::AtomicUsize;
 use crate::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use crate::util::CacheAligned;
+use crate::util::cache::CacheAligned;
 use std::default::Default;
 use std::mem::MaybeUninit;
 

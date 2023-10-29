@@ -1,5 +1,5 @@
 use crate::sync::atomic::Ordering::AcqRel;
-use crate::util::PhantomUnsync;
+use crate::util::marker::PhantomUnsync;
 use std::ptr::NonNull;
 
 mod error;
