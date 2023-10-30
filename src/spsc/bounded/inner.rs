@@ -1,8 +1,11 @@
-use crate::cell::{Cell, UnsafeCell};
+use crate::alloc::Layout;
+use crate::cell::UnsafeCell;
 use crate::spsc::bounded::error::{RecvError, SendError, TryRecvError, TrySendError};
 use crate::sync::atomic::AtomicUsize;
 use crate::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use crate::util::cache::CacheAligned;
+use crate::util::park::Parker;
+use std::cell::Cell; //There's only a Sender exclusive cell and a Receiver exclusive cell.
 use std::default::Default;
 use std::mem::MaybeUninit;
 
@@ -14,6 +17,8 @@ pub(crate) struct Inner<T> {
 }
 
 impl<T> Inner<T> {
+    pub(super) const LAYOUT: Layout = Layout::new::<Inner<T>>();
+
     pub(super) fn new(capacity: usize) -> Self {
         // should already be ensured in channel()
         debug_assert!(capacity.is_power_of_two(), "capacity wasn't a power of two");
@@ -185,12 +190,12 @@ impl<T> Inner<T> {
 
     #[inline]
     pub(super) fn wake_receiver(&self) {
-        //TODO: implement sleeping/waking
+        self.sender.recv_park.unpark();
     }
 
     #[inline]
     pub(super) fn wake_sender(&self) {
-        //TODO: implement sleeping/waking
+        self.receiver.send_park.unpark();
     }
 }
 
@@ -237,16 +242,33 @@ impl<T> Drop for Inner<T> {
 struct SenderData {
     tail: AtomicUsize,
     head_cache: Cell<usize>,
+    recv_park: Parker,
 }
 
 struct ReceiverData {
     head: AtomicUsize,
     tail_cache: Cell<usize>,
+    send_park: Parker,
 }
 
 pub(super) struct SharedData<T> {
     buffer: Box<[UnsafeCell<MaybeUninit<T>>]>,
-    pub(super) drop_count: AtomicUsize, /*dropped endpoint count*/
+    /*
+    starts off as 0, incremented when entering Sender/Receiver drop.
+    match 'previous value' {
+        0 => {
+            Now the channel is disconnected. We try to wake the other end point.
+            If the other end point was asleep, it will detect the disconnect and unblock.
+            Then, we increment 'drop_count' again and repeat this decision tree with the
+            new 'previous value'.
+            This is done so that the inner state can't be deallocated while we're waking
+            the other thread, but the disconnect has to be discoverable.
+        }
+        1 => just fall off drop.
+        2 => deallocate the inner state.
+    }
+    */
+    pub(super) drop_count: AtomicUsize,
 }
 
 impl Default for SenderData {
@@ -255,6 +277,7 @@ impl Default for SenderData {
         Self {
             tail: AtomicUsize::default(),
             head_cache: Cell::default(),
+            recv_park: Parker::new(),
         }
     }
 }
@@ -265,6 +288,7 @@ impl Default for ReceiverData {
         Self {
             head: AtomicUsize::default(),
             tail_cache: Cell::default(),
+            send_park: Parker::new(),
         }
     }
 }

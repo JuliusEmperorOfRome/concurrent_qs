@@ -1,3 +1,4 @@
+use crate::alloc::{alloc, dealloc};
 use crate::sync::atomic::Ordering::AcqRel;
 use crate::util::marker::PhantomUnsync;
 use std::ptr::NonNull;
@@ -19,7 +20,17 @@ pub fn channel<T>(min_capacity: usize) -> (Sender<T>, Receiver<T>) {
         .checked_next_power_of_two()
         .expect("capacity overflow"); /*from std::Vec: https://doc.rust-lang.org/src/alloc/raw_vec.rs.html*/
 
-    let inner = NonNull::from(Box::leak(Box::new(Inner::<T>::new(capacity))));
+    let inner = Inner::<T>::new(capacity);
+    //order is important: Inner is RAII, but NonNull isn't.
+    let inner = {
+        /*SAFETY: deallocated in either Sender's or Receiver's Drop*/
+        let inner_uninit = NonNull::new(unsafe { alloc(Inner::<T>::LAYOUT) as *mut Inner<T> })
+            .expect("failed to allocate memory for the shared state");
+        /*SAFETY: this is a safe way to write to _uninitialised memory_.*/
+        unsafe { inner_uninit.as_ptr().write(inner) };
+        inner_uninit
+    };
+    unsafe { inner.as_ptr().write(Inner::new(capacity)) };
     (
         Sender {
             inner: inner,
@@ -117,34 +128,38 @@ impl<T> Receiver<T> {
 
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
-        //The other endpoint hasn't dropped yet, wake it if it's sleeping.
-        if self.inner_ref().shared.drop_count.fetch_add(1, AcqRel) == 0 {
-        }
-        //The other endpoint has already been dropped, we have to deallocate inner.
-        else {
-            drop(unsafe {
-                /*SAFETY:
-                 *inner is created with a Box in channel().
-                 */
-                Box::from_raw(self.inner.as_ptr())
-            });
+        //this protocol is described at the declaration of 'drop_count'
+        loop {
+            match self.inner_ref().shared.drop_count.fetch_add(1, AcqRel) {
+                0 => self.inner_ref().wake_receiver(),
+                1 => break,
+                2 => {
+                    break unsafe {
+                        self.inner.as_ptr().drop_in_place();
+                        dealloc(self.inner.as_ptr() as *mut u8, Inner::<T>::LAYOUT)
+                    }
+                }
+                _ => unreachable!(),
+            }
         }
     }
 }
 
 impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
-        //The other endpoint hasn't dropped yet, wake it if it's sleeping.
-        if self.inner_ref().shared.drop_count.fetch_add(1, AcqRel) == 0 {
-        }
-        //The other endpoint has already been dropped, we have to deallocate inner.
-        else {
-            drop(unsafe {
-                /*SAFETY:
-                 *inner is created with a Box in channel().
-                 */
-                Box::from_raw(self.inner.as_ptr())
-            });
+        //this protocol is described at the declaration of 'drop_count'
+        loop {
+            match self.inner_ref().shared.drop_count.fetch_add(1, AcqRel) {
+                0 => self.inner_ref().wake_receiver(),
+                1 => break,
+                2 => {
+                    break unsafe {
+                        self.inner.as_ptr().drop_in_place();
+                        dealloc(self.inner.as_ptr() as *mut u8, Inner::<T>::LAYOUT)
+                    }
+                }
+                _ => unreachable!(),
+            }
         }
     }
 }

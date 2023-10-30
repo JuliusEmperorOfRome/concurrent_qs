@@ -3,15 +3,43 @@
 /// A fixed capacity queue for sending from a producer thread to a consumer thread.
 /// Only one thread may send and only one may receive at any given time.
 ///
-/// # Example
+/// # Examples
+/// ```
+/// use concurrent_qs::spsc::bounded;
+/// use std::thread;
+///
+/// fn main() {
+///     let (src, sink) = bounded::channel::<&'static str>(4);
+///
+///     thread::spawn(move || {
+///         src.send("H").unwrap();
+///         src.send("E").unwrap();
+///         src.send("L").unwrap();
+///         src.send("L").unwrap();
+///         src.send("O").unwrap();
+///     });
+///
+///     let mut str = String::new();
+///     while Ok(s) = sink.recv() {
+///         str.push_str(s);
+///     }
+///
+///     assert_eq!(str, "HELLO");
+/// }
+/// ```
+///
+/// This can also be done without blocking.
 ///
 /// ```
 /// use concurrent_qs::spsc::bounded::{self, TryRecvError};
 /// use std::thread;
+///
 /// fn main() {
 ///     let (src, sink) = bounded::channel::<&'static str>(8);
 ///
 ///     thread::spawn(move || {
+///         // In this example the queue never fills up, and therefore try_send
+///         // never fails. Normally, you would want to check the result.
 ///         src.try_send("H").unwrap();
 ///         src.try_send("E").unwrap();
 ///         src.try_send("L").unwrap();

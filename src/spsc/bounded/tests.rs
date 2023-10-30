@@ -84,7 +84,9 @@ const CHANNEL_SIZE: u8 = 2;
 
 #[test]
 fn try_insert_try_remove() {
-    model(|| {
+    let mut model = loom::model::Builder::new();
+    model.max_threads = 2;
+    model.check(|| {
         let (src, sink) = make_chan();
         try_insert(src);
         try_remove(sink);
@@ -93,7 +95,9 @@ fn try_insert_try_remove() {
 
 #[test]
 fn try_insert_block_remove() {
-    model(|| {
+    let mut model = loom::model::Builder::new();
+    model.max_threads = 2;
+    model.check(|| {
         let (src, sink) = make_chan();
         try_insert(src);
         block_remove(sink);
@@ -102,7 +106,9 @@ fn try_insert_block_remove() {
 
 #[test]
 fn block_insert_try_remove() {
-    model(|| {
+    let mut model = loom::model::Builder::new();
+    model.max_threads = 2;
+    model.check(|| {
         let (src, sink) = make_chan();
         block_insert(src);
         try_remove(sink);
@@ -111,7 +117,9 @@ fn block_insert_try_remove() {
 
 #[test]
 fn block_insert_block_remove() {
-    model(|| {
+    let mut model = loom::model::Builder::new();
+    model.max_threads = 2;
+    model.check(|| {
         let (src, sink) = make_chan();
         block_insert(src);
         block_remove(sink);
@@ -122,7 +130,6 @@ fn make_chan() -> (Sender<u8>, Receiver<u8>) {
     channel::<u8>(CHANNEL_SIZE as usize)
 }
 
-#[track_caller]
 fn try_insert(src: Sender<u8>) {
     thread::spawn(move || {
         for i in 0..=CHANNEL_SIZE {
@@ -137,7 +144,6 @@ fn try_insert(src: Sender<u8>) {
     });
 }
 
-#[track_caller]
 fn try_remove(sink: Receiver<u8>) {
     for i in 0..=CHANNEL_SIZE {
         loop {
@@ -157,7 +163,6 @@ fn try_remove(sink: Receiver<u8>) {
     }
 }
 
-#[track_caller]
 fn block_insert(src: Sender<u8>) {
     thread::spawn(move || {
         for i in 0..=CHANNEL_SIZE {
@@ -166,7 +171,6 @@ fn block_insert(src: Sender<u8>) {
     });
 }
 
-#[track_caller]
 fn block_remove(sink: Receiver<u8>) {
     for i in 0..=CHANNEL_SIZE {
         assert_eq!(

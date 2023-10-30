@@ -1,6 +1,6 @@
 [package]
 name = "concurrent_qs"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 
 [dependencies]
@@ -17,7 +17,7 @@ debug-assertions = true
 debug = "limited"
 lto = "thin"
 
-# this profile is meant for use with the hl-loom feature
+# this profile is meant for use with the full-loom feature
 [profile.full-loom]
 inherits = "release"
 debug-assertions = true

@@ -1,10 +1,8 @@
 cfg_loom! {
     pub(crate) use loom::cell::UnsafeCell;
-    pub(crate) use loom::cell::Cell;
 }
 
 cfg_not_loom! {
-    pub(crate) use std::cell::Cell;
     pub(crate) struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
     #[allow(dead_code)]
     impl<T> UnsafeCell<T> {

@@ -17,6 +17,9 @@ macro_rules! cfg_not_loom {
         )*
     };
 }
+
+#[doc(hidden)]
+mod alloc;
 #[doc(hidden)]
 mod cell;
 #[doc(hidden)]
