@@ -20,7 +20,7 @@
 ///     });
 ///
 ///     let mut str = String::new();
-///     while Ok(s) = sink.recv() {
+///     while let Ok(s) = sink.recv() {
 ///         str.push_str(s);
 ///     }
 ///
