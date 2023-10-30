@@ -17,7 +17,7 @@ impl<T> Inner<T> {
     pub(super) fn new(capacity: usize) -> Self {
         // should already be ensured in channel()
         debug_assert!(capacity.is_power_of_two(), "capacity wasn't a power of two");
-        #[cfg(not(loom))]
+        #[cfg(not(feature = "loom"))]
         let buffer = {
             let mut vec = Vec::with_capacity(capacity);
             /*SAFETY:
@@ -35,7 +35,7 @@ impl<T> Inner<T> {
 
         !!!DO NOT DELETE THE CODE BELOW!!!
         */
-        #[cfg(loom)]
+        #[cfg(feature = "loom")]
         let buffer = (0..capacity)
             .map(|_| UnsafeCell::new(MaybeUninit::uninit()))
             .collect::<Box<[UnsafeCell<MaybeUninit<T>>]>>();
@@ -56,7 +56,7 @@ impl<T> Inner<T> {
             Err(TrySendError::Full(ret)) => ret,
         };
         loop {
-            #[cfg(loom)]
+            #[cfg(feature = "loom")]
             loom::thread::yield_now();
             //TODO: implement sleeping/waking
             match self.try_send(resend) {
@@ -74,7 +74,7 @@ impl<T> Inner<T> {
             Err(TryRecvError::Empty) => {}
         };
         loop {
-            #[cfg(loom)]
+            #[cfg(feature = "loom")]
             loom::thread::yield_now();
             //TODO: implement sleeping/waking
             match self.try_recv() {
@@ -94,9 +94,9 @@ impl<T> Inner<T> {
          *tail is only modified by try_send and this is
          *an SPSC, so no other thread is modifying it.
          */
-        #[cfg(not(loom))]
+        #[cfg(not(feature = "loom"))]
         let tail = unsafe { self.sender.tail.as_ptr().read() };
-        #[cfg(loom)]
+        #[cfg(feature = "loom")]
         let tail = unsafe { self.sender.tail.unsync_load() };
 
         let cap = self.shared.buffer.len();
@@ -140,9 +140,9 @@ impl<T> Inner<T> {
          *head is only modified by try_recv and this is
          *an SPSC, so no other thread is modifying it.
          */
-        #[cfg(not(loom))]
+        #[cfg(not(feature = "loom"))]
         let head = unsafe { self.receiver.head.as_ptr().read() };
-        #[cfg(loom)]
+        #[cfg(feature = "loom")]
         let head = unsafe { self.receiver.head.unsync_load() };
 
         if head == self.receiver.tail_cache.get() {
@@ -202,14 +202,14 @@ impl<T> Drop for Inner<T> {
          *this object is being destroyed so we
          *have exclusive access to these atomics.
          */
-        #[cfg(not(loom))]
+        #[cfg(not(feature = "loom"))]
         let (mut head, tail) = unsafe {
             (
                 self.receiver.head.as_ptr().read(),
                 self.sender.tail.as_ptr().read(),
             )
         };
-        #[cfg(loom)]
+        #[cfg(feature = "loom")]
         let (mut head, tail) = unsafe {
             (
                 self.receiver.head.unsync_load(),

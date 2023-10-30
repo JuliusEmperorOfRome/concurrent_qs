@@ -29,7 +29,7 @@ impl Parker {
             mutex: Mutex::new(()),
         }
     }
-    #[cfg(loom)]
+    #[cfg(feature = "loom")]
     pub(crate) fn new() -> Self {
         Self {
             state: AtomicUsize::new(EMPTY),

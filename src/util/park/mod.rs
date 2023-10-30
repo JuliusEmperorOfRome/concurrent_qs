@@ -1,11 +1,12 @@
-#[cfg(all(loom, not(park)))]
+#[cfg(feature = "hl-loom")]
 mod loom;
-#[cfg(all(loom, not(park)))]
+#[cfg(feature = "hl-loom")]
 pub(crate) use loom::Parker;
 
-#[cfg(any(not(loom), park))]
+#[cfg(not(feature = "hl-loom"))]
 mod real;
-#[cfg(any(not(loom), park))]
+#[cfg(not(feature = "hl-loom"))]
+#[allow(unused_imports)]
 pub(crate) use real::Parker;
 
 #[cfg(test)]
