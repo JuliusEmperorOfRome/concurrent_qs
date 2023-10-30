@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use crate::sync::atomic::{
     AtomicUsize,
     Ordering::{Acquire, Release},
@@ -41,16 +42,20 @@ impl Parker {
     /// SAFETY: this method can't _EVER_ be called concurrently.
     #[inline(always)]
     pub(crate) unsafe fn park(&self) {
-        let prev_state = self.state.fetch_add(1, Acquire);
-        debug_assert!(
-            prev_state == NOTIFIED || prev_state == EMPTY,
-            "multiple threads parked in one parker."
-        );
-        if prev_state == NOTIFIED {
-            return; //already had a token
+        /* Potential deadlock:
+         * 1. parking thread transitions from EMPTY to PARKED
+         * 2. unpark call swaps state to NOTIFIED and finds PARKED
+         *   and calls condvar.notify_one(), which doesn't go through.
+         * 3. parking thread goes to park_slow and goes to sleep.
+         *
+         * Resolved by checking
+         */
+        // Do NOTIFIED=>EMPTY or EMPTY=>PARKED
+        match self.state.fetch_add(1, Acquire) {
+            NOTIFIED => return,
+            EMPTY => self.park_slow(),
+            _ => panic!("Invalid call to Parker::park."),
         }
-
-        self.park_slow();
     }
 
     #[inline(never)]
@@ -60,12 +65,8 @@ impl Parker {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
-        loop {
-            m = match self.condvar.wait(m) {
-                Ok(g) => g,
-                Err(poisoned) => poisoned.into_inner(),
-            };
 
+        loop {
             if self
                 .state
                 .compare_exchange(NOTIFIED, EMPTY, Acquire, Acquire)
@@ -75,11 +76,42 @@ impl Parker {
             } else {
                 //spurious wake-up.
             }
+
+            m = match self.condvar.wait(m) {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
         }
     }
 
     pub(crate) fn unpark(&self) {
         if self.state.swap(NOTIFIED, Release) == PARKED {
+            /*
+             * Potential deadlock:
+             *  1. parked thread wakes up and has the mutex.
+             *  2. parked thread checks state, finds PARKED.
+             *  3. unpark call swaps state to NOTIFIED, finds PARKED and
+             *    calls condvar.notify_one(). Since the condvar isn't
+             *    waiting yet, the notification does nothing.
+             *  4. parked thread sleeps on the condvar in the NOTIFIED state.
+             *  5. all later unpark calls find the NOTIFIED state and
+             *    don't try to wake the parked thread.
+             *
+             * To avoid this, we take the lock after writing NOTIFIED,
+             * but before calling notify_one.
+             */
+            /* Second potential deadlock:
+             * 1. parking thread enters park(), transitions from EMPTY to PARKED
+             * 2. unpark call swaps state to NOTIFIED and finds PARKED,
+             *   locks and drops the mutex, and calls condvar.notify_one(), which
+             *   does nothing.
+             * 3. parking thread goes to park_slow and goes to sleep.
+             *
+             * Resolved in park_slow by checking the state after locking the mutex,
+             * but before going to sleep.
+             *
+             */
+            drop(self.mutex.lock());
             self.condvar.notify_one();
         }
     }
@@ -114,18 +146,22 @@ mod tests {
     #[test]
     fn test_two_threads() {
         loom::model::model(|| {
-            static PARKER: Parker = Parker::new();
-            std::thread::spawn(|| PARKER.unpark());
-            unsafe { PARKER.park() };
+            use std::sync::Arc;
+            let parker = Arc::new(Parker::new());
+            let cloned = parker.clone();
+            loom::thread::spawn(move || {
+                cloned.unpark();
+            });
+            unsafe { parker.park() };
         });
     }
 
-    #[cfg(all(test, loom))]
     #[test]
     fn test_one_thread() {
         loom::model::model(|| {
             let parker = Parker::new();
-            parker.unpark()
+            parker.unpark();
+            unsafe { parker.park() };
         });
     }
 
