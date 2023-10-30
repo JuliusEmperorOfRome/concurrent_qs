@@ -21,7 +21,7 @@ const EMPTY: usize = 1;
 const PARKED: usize = 2;
 
 impl Parker {
-    #[cfg(not(loom))]
+    #[cfg(not(feature = "loom"))]
     pub(crate) const fn new() -> Self {
         Self {
             state: AtomicUsize::new(EMPTY),
