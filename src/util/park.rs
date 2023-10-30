@@ -21,7 +21,16 @@ const EMPTY: usize = 1;
 const PARKED: usize = 2;
 
 impl Parker {
+    #[cfg(not(loom))]
     pub(crate) const fn new() -> Self {
+        Self {
+            state: AtomicUsize::new(EMPTY),
+            condvar: Condvar::new(),
+            mutex: Mutex::new(()),
+        }
+    }
+    #[cfg(loom)]
+    pub(crate) fn new() -> Self {
         Self {
             state: AtomicUsize::new(EMPTY),
             condvar: Condvar::new(),
@@ -73,5 +82,52 @@ impl Parker {
         if self.state.swap(NOTIFIED, Release) == PARKED {
             self.condvar.notify_one();
         }
+    }
+}
+
+unsafe impl Send for Parker {}
+unsafe impl Sync for Parker {}
+
+#[cfg(any(all(test, not(loom)), all(test, loom, park)))]
+mod tests {
+    use super::Parker;
+    cfg_not_loom! {
+
+    #[test]
+    fn test_two_threads() {
+        static PARKER: Parker = Parker::new();
+        std::thread::spawn(|| PARKER.unpark());
+        unsafe { PARKER.park() };
+    }
+
+    #[test]
+    fn test_one_thread() {
+        let parker = Parker::new();
+        parker.unpark();
+        unsafe { parker.park() };
+    }
+
+    }
+
+    cfg_loom! {
+
+    #[test]
+    fn test_two_threads() {
+        loom::model::model(|| {
+            static PARKER: Parker = Parker::new();
+            std::thread::spawn(|| PARKER.unpark());
+            unsafe { PARKER.park() };
+        });
+    }
+
+    #[cfg(all(test, loom))]
+    #[test]
+    fn test_one_thread() {
+        loom::model::model(|| {
+            let parker = Parker::new();
+            parker.unpark()
+        });
+    }
+
     }
 }
