@@ -10,11 +10,16 @@ loom = { version = "0.6", features = ["checkpoint"], optional = true }
 hl-loom = ["loom"]
 full-loom = ["hl-loom"]
 
-# this profile is meant for the hl-loom feature
-[profile.loom]
+# this profile is meant for use with the hl-loom feature
+[profile.hl-loom]
 inherits = "release"
-opt-level = 3
-lto = "thin"
-debug = true
 debug-assertions = true
-overflow-checks = true
+debug = "limited"
+lto = "thin"
+
+# this profile is meant for use with the hl-loom feature
+[profile.full-loom]
+inherits = "release"
+debug-assertions = true
+debug = "limited"
+lto = "thin"
