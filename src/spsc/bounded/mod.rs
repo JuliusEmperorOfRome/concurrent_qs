@@ -46,6 +46,7 @@ pub fn channel<T>(min_capacity: usize) -> (Sender<T>, Receiver<T>) {
 /// The sending endpoint of a [`channel`].
 ///
 /// Data can be sent using the [`try_send`](Sender::try_send) method.
+#[derive(Debug)]
 pub struct Sender<T> {
     inner: NonNull<Inner<T>>,
     _unsync: PhantomUnsync,
@@ -54,6 +55,7 @@ pub struct Sender<T> {
 /// The receiving endpoint of a [`channel`].
 ///
 /// Data can be received using the [`try_recv`](Receiver::try_recv) method.
+#[derive(Debug)]
 pub struct Receiver<T> {
     inner: NonNull<Inner<T>>,
     _unsync: PhantomUnsync,
