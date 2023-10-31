@@ -1,40 +1,55 @@
 use std::error::Error;
 use std::fmt;
 
-/// An enumeration listing the failure modes of the [`try_send`](super::Sender::try_send) method.
+/// An enumeration listing the failure modes of `try_send` method of a `bounded::Sender`.
+///
+/// The available `bounded::Sender`s are
+/// - [spsc::bounded::Sender](crate::spsc::bounded::Sender)
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum TrySendError<T> {
-    /// The data couldn't be sent on the [`channel`](super::channel)
-    /// because the internal buffer was already full.
+    /// The data couldn't be sent on the `bounded::channel`
+    /// because it was already full.
+    ///
+    /// Contains the data that failed to send.
     Full(T),
-    /// The [`Receiver`](super::Receiver) bound to the [`channel`](super::channel)
+    /// The `bounded::Receiver` connected to the `bounded::channel`
     /// disconnected and any further sends will not succeed.
+    ///
+    /// Contains the data that failed to send.
     Disconnected(T),
 }
 
-/// An enumeration listing the failure modes of the [`try_recv`](super::Receiver::try_recv) method.
+/// An enumeration listing the failure modes of the `try_recv` method of a `bounded::Receiver`.
+///
+/// The available `bounded::Receiver`s are:
+/// - [spsc::bounded::Sender](crate::spsc::bounded::Sender)
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum TryRecvError {
-    /// No data was received from the [`channel`](super::channel)
-    /// because the internal buffer was empty.
+    /// No data was received from the `bounded::channel` because it was empty.
     Empty,
-    /// The [`Sender`](super::Sender) bound to the [`channel`](super::channel)
-    /// disconnected and all previously sent data was already received.
+    /// The `bounded::Sender` bound to the `bounded::channel` disconnected
+    /// and all previously sent data was already received.
     Disconnected,
 }
 
-/// Error for the [`send`](super::Sender::send) method.
+/// Error for the `send` method of a `Sender`.
 ///
-/// This error is returned when the [`Receiver`](super::Receiver) bound
-/// to the [`channel`](super::channel) has disconnected. The `T` inside
-/// is the item that failed to send.
+/// This error is returned when the `Receiver` connected
+/// to the `channel` has disconnected. Contains the data
+/// that failed to send.
+///
+/// The available `Sender`s are:
+/// - [spsc::bounded::Sender](crate::spsc::bounded::Sender)
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct SendError<T>(pub T);
 
-/// Error for the [`recv`](super::Receiver::recv) method.
+/// Error for the `recv` method of a `Receiver`.
 ///
-/// This error is returned when the [`Sender`](super::Sender) bound
-/// to the [`channel`](super::channel) has disconnected.
+/// This error is returned when the `Sender` connected to
+/// the `channel` has disconnected.
+///
+/// The available `Receiver`s are:
+/// - [spsc::bounded::Receiver](crate::spsc::bounded::Receiver)
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct RecvError {}
 

@@ -1,7 +1,9 @@
 /// A bounded lock-free Single Producer Single Consumer queue.
 ///
-/// A fixed capacity queue for sending from a producer thread to a consumer thread.
-/// Only one thread may send and only one may receive at any given time.
+/// A fixed capacity queue for sending from a producer thread to a
+/// consumer thread. Only one thread may send and only one may receive
+/// at any given time. It is lock-free as long as only [`try_send`](bounded::Sender::try_send)
+/// and [`try_recv`](bounded::Receiver::try_recv) are used.
 ///
 /// # Examples
 /// ```
@@ -31,7 +33,8 @@
 /// This can also be done without blocking.
 ///
 /// ```
-/// use concurrent_qs::spsc::bounded::{self, TryRecvError};
+/// use concurrent_qs::error::TryRecvError;
+/// use concurrent_qs::spsc::bounded;
 /// use std::thread;
 ///
 /// fn main() {
@@ -59,9 +62,4 @@
 ///     assert_eq!(str, "HELLO");
 /// }
 /// ```
-///
-/// # Cross-platform notes
-///
-/// This implementation depends only on pointer-sized atomics.
-#[cfg(target_has_atomic = "ptr")]
 pub mod bounded;

@@ -1,6 +1,6 @@
 use crate::alloc::Layout;
 use crate::cell::UnsafeCell;
-use crate::spsc::bounded::error::{RecvError, SendError, TryRecvError, TrySendError};
+use crate::error::{RecvError, SendError, TryRecvError, TrySendError};
 use crate::sync::atomic::AtomicUsize;
 use crate::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use crate::util::cache::CacheAligned;

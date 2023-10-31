@@ -1,11 +1,8 @@
 use crate::alloc::{alloc, dealloc};
+use crate::error::{RecvError, SendError, TryRecvError, TrySendError};
 use crate::sync::atomic::Ordering::AcqRel;
 use crate::util::marker::PhantomUnsync;
 use std::ptr::NonNull;
-
-mod error;
-#[doc(inline)]
-pub use error::{RecvError, SendError, TryRecvError, TrySendError};
 
 mod inner;
 use inner::Inner;
@@ -45,7 +42,8 @@ pub fn channel<T>(min_capacity: usize) -> (Sender<T>, Receiver<T>) {
 
 /// The sending endpoint of a [`channel`].
 ///
-/// Data can be sent using the [`try_send`](Sender::try_send) method.
+/// Data can be sent using the [`try_send`](Sender::try_send)
+/// and [`send`](Sender::send) methods.
 pub struct Sender<T> {
     inner: NonNull<Inner<T>>,
     _unsync: PhantomUnsync,
@@ -53,14 +51,21 @@ pub struct Sender<T> {
 
 /// The receiving endpoint of a [`channel`].
 ///
-/// Data can be received using the [`try_recv`](Receiver::try_recv) method.
+/// Data can be received using the [`try_recv`](Receiver::try_recv)
+/// and [`recv`](Receiver::recv) methods.
 pub struct Receiver<T> {
     inner: NonNull<Inner<T>>,
     _unsync: PhantomUnsync,
 }
 
 impl<T> Sender<T> {
-    /// Tries to send a value through this [`channel`] without blocking.
+    /// Tries to send a value through this [`channel`].
+    ///
+    /// # Notes
+    ///
+    /// - Will never block as long as [`recv`](Receiver::recv) hasn't been called.
+    /// - After every call to [`recv`](Receiver::recv), up to one [`try_send`](Sender::try_send)
+    /// call may block for a short period.
     #[inline]
     pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
         self.inner_ref().try_send(item)
@@ -70,6 +75,11 @@ impl<T> Sender<T> {
     ///
     /// If the [`channel`] is full, blocks and waits for the [`Receiver`].
     /// Returns a [`SendError`] if the [`Receiver`] is disconnected.
+    ///
+    /// # Note
+    ///
+    /// Calling this method may result in a [`try_recv`](Receiver::try_recv)
+    /// call blocking for a short period.
     #[inline]
     pub fn send(&self, item: T) -> Result<(), SendError<T>> {
         self.inner_ref().send(item)
@@ -90,7 +100,15 @@ impl<T> Sender<T> {
 }
 
 impl<T> Receiver<T> {
-    /// Tries to return a pending value without blocking.
+    /// Tries to return a pending value.
+    ///
+    /// # Notes
+    ///
+    /// - Returns [`TrySendError::Disconnected`] only after consuming all
+    /// sent data. To avoid this, use [`sender_connected`](Receiver::sender_connected).
+    /// - Will never block as long as [`send`](Sender::send) hasn't been called.
+    /// - After every call to [`send`](Sender::send), up to one [`try_recv`](Receiver::try_recv)
+    /// call may block for a short period.
     #[inline]
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
         self.inner_ref().try_recv()
@@ -99,7 +117,12 @@ impl<T> Receiver<T> {
     /// Reads a value from the [`channel`].
     ///
     /// If the [`channel`] is empty, blocks and waits for the [`Sender`].
-    /// Returns a [`RecvError`] if the [`Sender`] is disconnected.
+    ///
+    /// # Notes
+    /// - [`RecvError`] is only returned after consuming all sent data. To
+    /// avoid this, use [`sender_connected`](Receiver::sender_connected).
+    /// - Calling this method may result in a [`try_send`](Sender::try_send)
+    /// call blocking for a short period.
     #[inline]
     pub fn recv(&self) -> Result<T, RecvError> {
         self.inner_ref().recv()
@@ -109,10 +132,11 @@ impl<T> Receiver<T> {
     ///
     /// # Note
     ///
-    /// The [`try_recv`](Receiver::try_recv) method returns [`TryRecvError::Disconnected`]
-    /// only after consuming all previously sent data, even if the
-    /// [`Sender`] isn't connected. This method, on the other hand,
-    /// doesn't take pending data into account.
+    /// The [`try_recv`](Receiver::try_recv) and [`recv`](Receiver::recv)
+    /// methods return [`TryRecvError::Disconnected`] or [`RecvError`] only
+    /// after consuming all previously sent data, even if the [`Sender`] isn't
+    /// connected. This method doesn't take pending data into account and can
+    /// be used to avoid this behaviour.
     #[inline]
     pub fn sender_connected(&self) -> bool {
         self.inner_ref().peer_connected()
