@@ -44,6 +44,13 @@ fn st_receiver_disconnect() {
     drop(sink);
     assert_eq!(src.try_send(1), Err(TrySendError::Disconnected(1)));
 }
+
+#[test]
+fn send_non_copy() {
+    let (src, _sink) = channel::<Box<str>>(1);
+    src.send("Hello".to_owned().into_boxed_str()).unwrap();
+}
+
 }
 
 cfg_loom! {
