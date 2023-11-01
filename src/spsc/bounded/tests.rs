@@ -47,8 +47,10 @@ fn st_receiver_disconnect() {
 
 #[test]
 fn send_non_copy() {
-    let (src, _sink) = channel::<Box<str>>(1);
+    use std::ops::Deref;
+    let (src, sink) = channel::<Box<str>>(1);
     src.send("Hello".to_owned().into_boxed_str()).unwrap();
+    assert_eq!(sink.recv().unwrap().deref(), "Hello");
 }
 
 }
