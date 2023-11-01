@@ -19,15 +19,15 @@ pub enum TrySendError<T> {
     Disconnected(T),
 }
 
-/// An enumeration listing the failure modes of the `try_recv` method of a `bounded::Receiver`.
+/// An enumeration listing the failure modes of the `try_recv` method of a `Receiver`.
 ///
-/// The available `bounded::Receiver`s are:
+/// The available `Receiver`s are:
 /// - [spsc::bounded::Sender](crate::spsc::bounded::Sender)
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum TryRecvError {
-    /// No data was received from the `bounded::channel` because it was empty.
+    /// No data was received from the `channel` because it was empty.
     Empty,
-    /// The `bounded::Sender` bound to the `bounded::channel` disconnected
+    /// The `Sender` bound to the `channel` disconnected
     /// and all previously sent data was already received.
     Disconnected,
 }
