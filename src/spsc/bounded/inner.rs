@@ -61,9 +61,11 @@ impl<T> Inner<T> {
             Err(TrySendError::Full(ret)) => ret,
         };
         loop {
-            #[cfg(feature = "loom")]
-            loom::thread::yield_now();
-            //TODO: implement sleeping/waking
+            //SAFETY: park can't be called by different threads, since Sender is !Sync.
+            unsafe {
+                self.receiver.send_park.park();
+            }
+
             match self.try_send(resend) {
                 Ok(_) => break Ok(()),
                 Err(TrySendError::Disconnected(ret)) => break Err(SendError(ret)),
@@ -79,9 +81,11 @@ impl<T> Inner<T> {
             Err(TryRecvError::Empty) => {}
         };
         loop {
-            #[cfg(feature = "loom")]
-            loom::thread::yield_now();
-            //TODO: implement sleeping/waking
+            //SAFETY: park can't be called by different threads, since Receiver is !Sync.
+            unsafe {
+                self.sender.recv_park.park();
+            }
+
             match self.try_recv() {
                 Ok(ret) => return Ok(ret),
                 Err(TryRecvError::Disconnected) => return Err(RecvError {}),
