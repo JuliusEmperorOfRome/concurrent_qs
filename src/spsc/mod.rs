@@ -63,3 +63,7 @@
 /// }
 /// ```
 pub mod bounded;
+
+#[cfg(feature = "unstable")]
+#[allow(missing_docs)]
+pub mod unbounded;
