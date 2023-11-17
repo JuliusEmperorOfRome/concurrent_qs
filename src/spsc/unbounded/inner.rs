@@ -38,6 +38,10 @@ struct Node<T> {
 }
 
 impl<T> Inner<T> {
+    pub(super) fn peer_connected(&self) -> bool {
+        self.drop_count.load(Acquire) == 0
+    }
+
     pub(super) fn send(&self, item: T) -> Result<(), SendError<T>> {
         if self.drop_count.load(Relaxed) != 0 {
             Err(SendError(item))

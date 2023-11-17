@@ -1,10 +1,11 @@
 # concurrent_qs
 
 A rust crate that aims to provide access to common queues used in concurrent programming.
-Currently, only a bounded SPSC queue is provided.
+Currently, only SPSC queues are provided.
 
 ## Usage
 
+All queues are in `{type}::{bounded|unbounded}`.
 For example, to use a bounded SPSC queue, you would write something like this.
 
 ```rust

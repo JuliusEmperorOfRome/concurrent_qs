@@ -22,7 +22,8 @@ pub enum TrySendError<T> {
 /// An enumeration listing the failure modes of the `try_recv` method of a `Receiver`.
 ///
 /// The available `Receiver`s are:
-/// - [spsc::bounded::Sender](crate::spsc::bounded::Sender)
+/// - [spsc::bounded::Receiver](crate::spsc::bounded::Receiver)
+/// - [spsc::unbounded::Receiver](crate::spsc::unbounded::Receiver)
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum TryRecvError {
     /// No data was received from the `channel` because it was empty.
@@ -40,6 +41,7 @@ pub enum TryRecvError {
 ///
 /// The available `Sender`s are:
 /// - [spsc::bounded::Sender](crate::spsc::bounded::Sender)
+/// - [spsc::unbounded::Sender](crate::spsc::unbounded::Sender)
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct SendError<T>(pub T);
 
@@ -50,6 +52,7 @@ pub struct SendError<T>(pub T);
 ///
 /// The available `Receiver`s are:
 /// - [spsc::bounded::Receiver](crate::spsc::bounded::Receiver)
+/// - [spsc::unbounded::Receiver](crate::spsc::unbounded::Receiver)
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct RecvError {}
 

@@ -6,7 +6,8 @@
 /// and [`try_recv`](bounded::Receiver::try_recv) are used.
 ///
 /// # Examples
-/// ```
+///
+/// ```rust
 /// use concurrent_qs::spsc::bounded;
 /// use std::thread;
 ///
@@ -64,6 +65,32 @@
 /// ```
 pub mod bounded;
 
-#[cfg(feature = "unstable")]
-#[allow(missing_docs)]
+/// An unbounded lock-free Single Producer Single Consumer queue.
+///
+/// An unbounded queue for sending from a producer thread to a
+/// consumer thread. Only one thread may send and only one may
+/// receive at any given time.
+///
+/// # Examples
+///
+/// ```rust
+/// use concurrent_qs::spsc::unbounded;
+/// use std::thread;
+///
+/// fn main() {
+///     let (src, sink) = unbounded::channel::<&'static str>();
+///
+///     thread::spawn(move || {
+///         src.send("One").unwrap();
+///         src.send("Two").unwrap();
+///         src.send("Three").unwrap();
+///     });
+///     let mut str = String::new();
+///     while let Ok(s) = sink.recv() {
+///         str.push_str(s);
+///     }
+///
+///     assert_eq!(str, "OneTwoThree");
+/// }
+/// ```
 pub mod unbounded;
