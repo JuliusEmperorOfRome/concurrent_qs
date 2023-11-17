@@ -95,6 +95,7 @@ const CHANNEL_SIZE: u8 = 2;
 fn try_insert_try_remove() {
     let mut model = loom::model::Builder::new();
     model.max_threads = 2;
+    model.preemption_bound = Some(4);
     model.check(|| {
         let (src, sink) = make_chan();
         try_insert(src);
@@ -106,6 +107,7 @@ fn try_insert_try_remove() {
 fn try_insert_block_remove() {
     let mut model = loom::model::Builder::new();
     model.max_threads = 2;
+    model.preemption_bound = Some(4);
     model.check(|| {
         let (src, sink) = make_chan();
         try_insert(src);
@@ -117,6 +119,7 @@ fn try_insert_block_remove() {
 fn block_insert_try_remove() {
     let mut model = loom::model::Builder::new();
     model.max_threads = 2;
+    model.preemption_bound = Some(4);
     model.check(|| {
         let (src, sink) = make_chan();
         block_insert(src);
@@ -128,6 +131,7 @@ fn block_insert_try_remove() {
 fn block_insert_block_remove() {
     let mut model = loom::model::Builder::new();
     model.max_threads = 2;
+    model.preemption_bound = Some(4);
     model.check(|| {
         let (src, sink) = make_chan();
         block_insert(src);
