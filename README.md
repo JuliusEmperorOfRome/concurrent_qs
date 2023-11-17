@@ -60,3 +60,10 @@ fn main() {
     assert_eq!(result.as_str(), "Hello, World!");
 }
 ```
+
+# Features
+
+- full &mdash; enables all queues in the crate.
+- spsc-all &mdash; enables **\[un\]bounded::spsc** queues.
+- spsc-bounded &mdash; enables **the bounded::spsc** queue.
+- spsc-unbounded &mdash; enables **the unbounded::spsc** queue.
