@@ -34,8 +34,8 @@ pub struct Receiver<T>(inner::InnerHolder<T>, PhantomUnsync);
 impl<T> Sender<T> {
     /// Sends a value through this [`channel`].
     ///
-    /// It does not block by itself, but it potentially allocates
-    /// memory, so [`send`] is **not** real-time safe by any means.
+    /// It does not block by itself, but it potentially allocates memory,
+    /// so [`send`](Sender::send) is **not** real-time safe by any means.
     ///
     /// # Panics
     ///
@@ -69,7 +69,7 @@ impl<T> Receiver<T> {
     ///
     /// # Note
     ///
-    /// Returns [`TrySendError::Disconnected`] only after consuming all
+    /// Returns [`TryRecvError::Disconnected`] only after consuming all
     /// sent data. To avoid this, use [`sender_connected`](Receiver::sender_connected).
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
         self.0.try_recv()

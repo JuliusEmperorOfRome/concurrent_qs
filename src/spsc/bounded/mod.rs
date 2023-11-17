@@ -104,7 +104,7 @@ impl<T> Receiver<T> {
     ///
     /// # Notes
     ///
-    /// - Returns [`TrySendError::Disconnected`] only after consuming all
+    /// - Returns [`TryRecvError::Disconnected`] only after consuming all
     /// sent data. To avoid this, use [`sender_connected`](Receiver::sender_connected).
     /// - Will never block as long as [`send`](Sender::send) hasn't been called.
     /// - After every call to [`send`](Sender::send), up to one [`try_recv`](Receiver::try_recv)

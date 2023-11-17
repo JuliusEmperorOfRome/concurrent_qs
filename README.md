@@ -5,10 +5,18 @@ Currently, only SPSC queues are provided.
 
 ## Usage
 
-All queues are in `{type}::{bounded|unbounded}`.
+All queues are enabled with a `{type}-{bounded|unbounded}` feature and are placed
+in `{type}::{bounded|unbounded}`. There are also `{type}-all` and `full` features,
+enabling all `{type}` queues and the full library respectively.
+
 For example, to use a bounded SPSC queue, you would write something like this.
 
-```rust
+```toml
+[dependencies]
+concurrent_qs = ["spsc-bounded"]
+```
+
+```rust,no_run
 use concurrent_qs::spsc::bounded;
 use concurrent_qs::error::*;
 

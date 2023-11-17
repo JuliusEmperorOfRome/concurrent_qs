@@ -8,7 +8,11 @@ edition = "2021"
 loom = { version = "0.6", features = ["checkpoint"], optional = true }
 
 [features]
-unstable = []
+default = []
+full = ["spsc-all"]
+spsc-bounded = []
+spsc-unbounded = []
+spsc-all = ["spsc-bounded", "spsc-unbounded"]
 hl-loom = ["loom"]
 full-loom = ["hl-loom"]
 

@@ -1,4 +1,5 @@
 /// A bounded lock-free Single Producer Single Consumer queue.
+/// Enabled by the `spsc-bounded` feature.
 ///
 /// A fixed capacity queue for sending from a producer thread to a
 /// consumer thread. Only one thread may send and only one may receive
@@ -63,9 +64,11 @@
 ///     assert_eq!(str, "HELLO");
 /// }
 /// ```
+#[cfg(any(doc, feature = "spsc-bounded"))]
 pub mod bounded;
 
 /// An unbounded lock-free Single Producer Single Consumer queue.
+/// Enabled by the `spsc-unbounded` feature.
 ///
 /// An unbounded queue for sending from a producer thread to a
 /// consumer thread. Only one thread may send and only one may
@@ -93,4 +96,5 @@ pub mod bounded;
 ///     assert_eq!(str, "OneTwoThree");
 /// }
 /// ```
+#[cfg(any(doc, feature = "spsc-unbounded"))]
 pub mod unbounded;
