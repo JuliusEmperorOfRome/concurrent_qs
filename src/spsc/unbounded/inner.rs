@@ -70,12 +70,13 @@ impl<T> Inner<T> {
 
         let new_tail = match NonNull::new(tail.next.load(Acquire)) {
             Some(p) => p,
-            None => {
-                return match self.drop_count.load(Relaxed) {
-                    0 => Err(TryRecvError::Empty),
-                    _ => Err(TryRecvError::Disconnected),
-                }
-            }
+            None => match self.drop_count.load(Acquire) {
+                0 => return Err(TryRecvError::Empty),
+                _ => match NonNull::new(tail.next.load(Acquire)) {
+                    Some(p) => p,
+                    None => return Err(TryRecvError::Disconnected),
+                },
+            },
         };
 
         //SAFETY: nodes live until Inner::drop
@@ -217,9 +218,9 @@ impl<T> Drop for Inner<T> {
                     (x as *mut T).drop_in_place()
                 });
 
-                #[cfg(not(loom))]
+                #[cfg(not(feature = "loom"))]
                 break *node.next.get_mut();
-                #[cfg(loom)]
+                #[cfg(feature = "loom")]
                 break node.next.with_mut(|x| *x);
             };
 
@@ -277,9 +278,9 @@ impl<T> Node<T> {
     /// - `node`.as_mut must be valid (See [`core::ptr::NonNull`])
     #[inline(always)]
     unsafe fn with_mut_next<R>(node: NonNull<Self>, f: impl Fn(&mut *mut Self) -> R) -> R {
-        #[cfg(not(loom))]
+        #[cfg(not(feature = "loom"))]
         return f((&mut *node.as_ptr()).next.get_mut());
-        #[cfg(loom)]
+        #[cfg(feature = "loom")]
         return (&mut *node.as_ptr()).next.with_mut(f);
     }
 }

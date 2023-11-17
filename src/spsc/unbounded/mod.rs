@@ -37,36 +37,5 @@ impl<T> Drop for Sender<T> {
     }
 }
 
-#[cfg(all(test, not(loom)))]
-mod tests {
-    #[test]
-    fn drop() {
-        use std::sync::Arc;
-        let arc = Arc::new(());
-        {
-            let (src, _sink) = super::channel();
-            src.send(arc.clone()).unwrap();
-            src.send(arc.clone()).unwrap();
-            src.send(arc.clone()).unwrap();
-            src.send(arc.clone()).unwrap();
-            src.send(arc.clone()).unwrap();
-        }
-        assert_eq!(Arc::strong_count(&arc), 1);
-    }
-
-    #[test]
-    fn order() {
-        let (src, sink) = super::channel::<u8>();
-        std::thread::spawn(move || {
-            for i in 0..10 {
-                src.send(i).unwrap();
-            }
-        });
-        for i in 0..10 {
-            assert_eq!(sink.recv().unwrap(), i);
-        }
-    }
-
-    #[test]
-    fn sender_dc() {}
-}
+#[cfg(test)]
+mod tests;
